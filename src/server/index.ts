@@ -64,7 +64,7 @@ app.post('/api/v1/enquiries/parse', async (c) => {
 // Ensures 100% reliable functionality whether D1 is connected or running in local client-server mode!
 import { sampleEnquiriesFixture } from './fixtures.ts';
 
-let inMemoryRecords = [...sampleEnquiriesFixture];
+let inMemoryRecords: any[] = [...sampleEnquiriesFixture];
 let auditEvents: any[] = [];
 
 // 4. List Enquiries & Tickets

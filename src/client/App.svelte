@@ -3,6 +3,7 @@
   import { sampleEnquiriesFixture } from '../server/fixtures';
   import { parseIncomingMessage } from '../lib/engine/parser';
   import { calculateSlaStatus } from '../lib/engine/sla';
+  import { soundFx } from '../lib/audio/sound_fx.ts';
   import type { ExtractionResult, PipelineStage, Channel } from '../lib/types/crm';
 
   // --- THEME & VIEWPORT STATE ---
@@ -11,6 +12,13 @@
   let evaluatorMode = $state(false);
   let showPortalsMenu = $state(false);
   let showParserModal = $state(false);
+  let audioEnabled = $state(soundFx.enabled);
+
+  // Ingestion Modal State
+  let ingestSenderName = $state('Tanvir Hossain');
+  let ingestPhone = $state('+8801712345678');
+  let ingestChannel = $state<Channel>('WhatsApp');
+  let ingestMessage = $state('Assalamualaikum, amader corporate team er jonno AI bootcamp quote lagbe. 25 jon engineer attend korbe.');
 
   // --- DATA & TRIAGE STATE ---
   let enquiries = $state([...sampleEnquiriesFixture]);
@@ -75,6 +83,15 @@
     }
   }
 
+  function toggleAudio() {
+    audioEnabled = soundFx.toggle();
+    if (audioEnabled) {
+      showFeedback('🔊 Audio FX enabled (Web Audio synthesized)');
+    } else {
+      showFeedback('🔇 Audio FX muted');
+    }
+  }
+
   // --- RECONCILED DATA & ORTHOGONAL SLA EVALUATION ---
   let evaluatedEnquiries = $derived(
     enquiries.map(rec => {
@@ -112,21 +129,59 @@
             ? 'AT_RISK' 
             : 'HEALTHY';
 
-      // 3px Status Rail Class
-      const railClass = businessPriority === 'P0' || slaState === 'BREACHED' 
-        ? 'rail-p0' 
-        : slaState === 'AT_RISK' || rec.triage_category === 'SUPPORT_BILLING' 
-          ? 'rail-at-risk' 
-          : slaState === 'MET' 
-            ? 'rail-met' 
-            : 'rail-healthy';
+      // 6-Tier Urgency Matrix & Priority Glow
+      let urgencyTier: 0 | 1 | 2 | 3 | 4 | 5 = 4;
+      let urgencyLabel = '';
+      let urgencyGlowClass = '';
+      let urgencyRailClass = '';
+
+      if (isMet) {
+        urgencyTier = 5;
+        urgencyLabel = 'SLA Met';
+        urgencyRailClass = 'rail-met';
+        urgencyGlowClass = 'border-slate-200 dark:border-slate-800';
+      } else if (sla.isBreached || businessPriority === 'P0') {
+        const overdueHours = Math.abs(sla.hoursRemaining);
+        if (overdueHours >= 2 || businessPriority === 'P0') {
+          urgencyTier = 0; // > 2h overdue or P0 PR threat
+          urgencyLabel = businessPriority === 'P0' 
+            ? 'P0 · Critical Risk' 
+            : `Overdue ${Math.round(overdueHours)}h`;
+          urgencyGlowClass = 'border-red-500/80 shadow-[0_0_14px_rgba(220,38,38,0.35)] animate-pulse bg-red-50/40 dark:bg-red-950/20';
+          urgencyRailClass = 'rail-p0';
+        } else {
+          urgencyTier = 1; // 1h - 2h overdue
+          urgencyLabel = `Overdue ${Math.round(overdueHours)}h`;
+          urgencyGlowClass = 'border-rose-400/80 shadow-[0_0_10px_rgba(225,29,72,0.25)] bg-rose-50/30 dark:bg-rose-950/15';
+          urgencyRailClass = 'rail-p0';
+        }
+      } else if (sla.hoursRemaining <= 1) {
+        urgencyTier = 2; // < 1h remaining (Critical Imminent Breach)
+        const mins = Math.max(1, Math.round(sla.hoursRemaining * 60));
+        urgencyLabel = `CRITICAL · ${mins}m left`;
+        urgencyGlowClass = 'border-orange-500/80 shadow-[0_0_12px_rgba(234,88,12,0.35)] animate-pulse bg-orange-50/30 dark:bg-orange-950/20';
+        urgencyRailClass = 'rail-at-risk';
+      } else if (sla.hoursRemaining <= 3) {
+        urgencyTier = 3; // 1h - 3h remaining (At Risk Warning)
+        urgencyLabel = `At Risk · ${Math.round(sla.hoursRemaining)}h left`;
+        urgencyGlowClass = 'border-amber-400/60 shadow-[0_0_8px_rgba(217,119,6,0.2)] bg-amber-50/20 dark:bg-amber-950/10';
+        urgencyRailClass = 'rail-at-risk';
+      } else {
+        urgencyTier = 4; // Healthy (> 3h)
+        urgencyLabel = `In SLA · ${Math.round(sla.hoursRemaining)}h left`;
+        urgencyGlowClass = 'border-warm-200 dark:border-slate-800';
+        urgencyRailClass = 'rail-healthy';
+      }
 
       return {
         ...rec,
         businessPriority,
         priorityReason,
         slaState,
-        railClass,
+        railClass: urgencyRailClass,
+        urgencyTier,
+        urgencyLabel,
+        urgencyGlowClass,
         sla_hours_remaining: sla.hoursRemaining,
         sla_formatted: isMet ? 'SLA Met' : sla.formattedTimeRemaining,
         is_breached: !isMet && sla.isBreached,
@@ -208,6 +263,7 @@
       }
       return e;
     });
+    soundFx.playActionSuccess();
     showFeedback('Outbound response approved & sent. SLA timer met.');
   }
 
@@ -218,7 +274,65 @@
       }
       return e;
     });
+    soundFx.playActionSuccess();
     showFeedback(`Stage transitioned to ${stage}`);
+  }
+
+  function scrubSimTime(newTime: string) {
+    const prevBreached = evaluatedEnquiries.filter(e => e.is_breached).length;
+    simTime = newTime;
+    setTimeout(() => {
+      const newBreached = evaluatedEnquiries.filter(e => e.is_breached).length;
+      if (newBreached > prevBreached) {
+        soundFx.playWarningPing();
+      }
+    }, 50);
+  }
+
+  function ingestCustomMessage() {
+    if (!ingestMessage.trim()) return;
+
+    const extraction = parseIncomingMessage(ingestMessage, ingestChannel);
+    const newId = enquiries.length > 0 ? Math.max(...enquiries.map(e => e.id)) + 1 : 1;
+
+    const newEnquiry: any = {
+      id: newId,
+      channel: ingestChannel,
+      received_at: new Date().toISOString(),
+      sender_name: ingestSenderName || 'Direct Inbound Customer',
+      phone: ingestPhone || null,
+      normalized_phone: extraction.normalized_phone || ingestPhone || null,
+      contact_id: `ct_${newId}`,
+      detected_language: extraction.detected_language,
+      language_confidence: extraction.confidence,
+      program_intent: extraction.program_intent,
+      triage_category: extraction.triage_category,
+      urgency: extraction.urgency,
+      sentiment: extraction.sentiment,
+      pipeline_stage: 'New' as PipelineStage,
+      estimated_value_bdt: extraction.estimated_budget_bdt || 0,
+      seats: extraction.seats_detected || 1,
+      sla_due_at: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
+      first_response_at: null,
+      message: ingestMessage,
+      suggested_reply: extraction.suggested_reply,
+      reply_status: 'PENDING',
+      flags: extraction.urgency === 'CRITICAL' ? ['PR_RISK'] : []
+    };
+
+    enquiries = [newEnquiry, ...enquiries];
+    selectedId = newId;
+    showParserModal = false;
+
+    if (extraction.triage_category === 'CRITICAL_ESCALATION') {
+      soundFx.playEmergencyAlert();
+      showFeedback(`🚨 Ingested P0 Critical Ticket #${newId}`);
+    } else {
+      soundFx.playNewMessage();
+      showFeedback(`✅ Ingested Enquiry #${newId} (${extraction.triage_category})`);
+    }
+
+    ingestMessage = '';
   }
 
   function copyToClipboard(text: string, label: string) {
@@ -271,35 +385,53 @@
 <div class="h-screen w-screen flex flex-col overflow-hidden bg-warm-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 font-sans selection:bg-orange-600 selection:text-white">
 
   <!-- ======================================================== -->
-  <!-- 1. TOP COMMAND BAR (RESTRAINED BIAI ENTERPRISE HEADER)    -->
+  <!-- 1. TOP COMMAND BAR (AUTHENTIC BIAI ECOSYSTEM HEADER)      -->
   <!-- ======================================================== -->
-  <header class="h-14 border-b border-warm-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/90 backdrop-blur px-4 flex items-center justify-between gap-4 shrink-0 z-30">
+  <header class="h-14 border-b border-warm-200 dark:border-slate-800 bg-[#FAF9F6] dark:bg-[#080C14] px-4 flex items-center justify-between gap-4 shrink-0 z-30 transition-colors">
     
-    <!-- Left: Authentic BIAI Brand Identity & Workspace Switcher -->
-    <div class="flex items-center gap-3">
-      <!-- Official BIAI Circular Woven Emblem -->
-      <img src="/biai-logo.png" alt="Bangladesh Institute of AI" class="w-8 h-8 rounded-full shrink-0 object-contain shadow-xs" />
+    <!-- Left: Authentic BIAI Brand Identity & Ecosystem Navigation -->
+    <div class="flex items-center gap-5">
+      <!-- Official BIAI Circular Woven Emblem & Spaced Wordmark -->
+      <a href="https://biai.com.bd" target="_blank" rel="noopener noreferrer" class="flex items-center gap-2.5 group">
+        <img src="/biai-logo.png" alt="Bangladesh Institute of AI" class="w-8 h-8 rounded-full shrink-0 object-contain shadow-xs transition group-hover:scale-105" />
+        <span class="font-bold tracking-[0.3em] text-slate-900 dark:text-white text-base">B I A I</span>
+      </a>
 
-      <!-- Spaced B I A I Wordmark -->
-      <div class="flex items-center gap-2">
-        <span class="font-bold tracking-[0.25em] text-slate-900 dark:text-white text-sm">B I A I</span>
-        <span class="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-warm-100 text-warm-800 border border-warm-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
-          CRM Triage
+      <!-- Ecosystem Workspace Navigation Links (Styled to match biai.com.bd navbar) -->
+      <nav class="hidden md:flex items-center gap-1 text-xs font-medium">
+        <!-- Active CRM Triage link with authentic BIAI bottom underline bar -->
+        <span class="relative py-4 px-3 font-semibold text-orange-600 dark:text-orange-400 flex items-center gap-1.5 cursor-default">
+          <span>CRM Triage</span>
+          <span class="absolute bottom-0 left-2 right-2 h-0.5 bg-orange-600 dark:bg-orange-500 rounded-full"></span>
         </span>
-      </div>
 
-      <div class="h-4 w-[1px] bg-warm-200 dark:bg-slate-800 mx-1"></div>
-
-      <!-- Project Workspace Switcher -->
-      <div class="relative">
+        <!-- Switch to Task 2 Corporate Pipeline -->
         <a 
           href="/task2" 
           title="Switch to Corporate Pipeline workspace"
-          class="text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-warm-100 dark:hover:bg-slate-800 transition">
-          <span>Task 1: Omnichannel CRM</span>
-          <svg class="w-3 h-3 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          class="py-4 px-3 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition">
+          Corporate Pipeline
         </a>
-      </div>
+
+        <!-- External BIAI Portals directly from biai.com.bd -->
+        <a 
+          href="https://biai.com.bd/courses" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          class="py-4 px-3 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition flex items-center gap-1">
+          <span>Courses</span>
+          <svg class="w-2.5 h-2.5 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+        </a>
+
+        <a 
+          href="https://biai.com.bd" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          class="py-4 px-3 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition flex items-center gap-1">
+          <span>For Business</span>
+          <svg class="w-2.5 h-2.5 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+        </a>
+      </nav>
     </div>
 
     <!-- Center: Global Search (Cmd+K) -->
@@ -314,7 +446,7 @@
         type="text" 
         bind:value={searchQuery}
         placeholder="Search sender, company, phone (+880), keyword...  ⌘K"
-        class="w-full text-xs pl-9 pr-14 py-1.5 rounded-lg border border-warm-200 dark:border-slate-800 bg-warm-50/70 dark:bg-slate-950/70 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-orange-600 transition"
+        class="w-full text-xs pl-9 pr-14 py-1.5 rounded-lg border border-warm-200 dark:border-slate-800 bg-white/70 dark:bg-slate-950/70 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-orange-600 transition"
       />
       {#if searchQuery}
         <button 
@@ -329,29 +461,18 @@
 
     <!-- Right: Utility Controls & Primary CTA -->
     <div class="flex items-center gap-2">
-      <!-- Ecosystem Portals Dropdown -->
-      <div class="relative">
-        <button 
-          onclick={() => showPortalsMenu = !showPortalsMenu}
-          class="text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 px-2.5 py-1.5 rounded hover:bg-warm-100 dark:hover:bg-slate-800 flex items-center gap-1 transition">
-          <span>Portals</span>
-          <svg class="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
-        </button>
-
-        {#if showPortalsMenu}
-          <div class="absolute right-0 mt-1 w-48 bg-white dark:bg-slate-900 border border-warm-200 dark:border-slate-800 rounded-lg shadow-lg py-1 z-40 text-xs">
-            <a href="https://biai.com.bd" target="_blank" rel="noopener noreferrer" class="block px-3 py-2 hover:bg-warm-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200">
-              biai.com.bd (Public Site) ↗
-            </a>
-            <a href="https://biai.com.bd/courses" target="_blank" rel="noopener noreferrer" class="block px-3 py-2 hover:bg-warm-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200">
-              Course Catalog & Curricula ↗
-            </a>
-            <a href="https://biai.com.bd" target="_blank" rel="noopener noreferrer" class="block px-3 py-2 hover:bg-warm-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200">
-              For Business (B2B Corporate) ↗
-            </a>
-          </div>
+      <!-- Sound FX Toggle Button -->
+      <button 
+        onclick={toggleAudio}
+        aria-label="Toggle audio effects"
+        title={audioEnabled ? 'Audio FX Enabled (Click to Mute)' : 'Audio FX Muted (Click to Unmute)'}
+        class="text-xs p-1.5 rounded flex items-center gap-1 text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-warm-100 dark:hover:bg-slate-800 transition">
+        {#if audioEnabled}
+          <span class="text-emerald-600 dark:text-emerald-400 font-mono text-sm" title="Audio On">🔊</span>
+        {:else}
+          <span class="text-slate-400 font-mono text-sm" title="Audio Muted">🔇</span>
         {/if}
-      </div>
+      </button>
 
       <!-- Evaluator Mode Sandbox Toggle -->
       <button 
@@ -384,10 +505,10 @@
         {/if}
       </button>
 
-      <!-- Primary Action Button (BIAI Burnt Orange Pill) -->
+      <!-- Primary Action Button (Authentic BIAI Orange Pill matching Start Building) -->
       <button 
         onclick={() => showParserModal = true}
-        class="text-xs font-semibold bg-orange-600 hover:bg-orange-500 text-white px-3.5 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm shadow-orange-600/20 active:scale-[0.98] transition">
+        class="text-xs font-semibold bg-[#C2410C] hover:bg-[#EA580C] text-white px-4 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm hover:shadow-orange-600/30 active:scale-[0.97] transition">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
         <span>+ Ingest Message</span>
       </button>
@@ -413,32 +534,32 @@
       <div class="flex items-center gap-1.5">
         <span class="text-slate-500 text-[11px] mr-1">Scrub Clock:</span>
         <button 
-          onclick={() => simTime = '2026-10-27T12:00:00'}
+          onclick={() => scrubSimTime('2026-10-27T12:00:00')}
           class="px-2 py-0.5 rounded text-[11px] font-medium bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100">
           -24h
         </button>
         <button 
-          onclick={() => simTime = '2026-10-28T00:00:00'}
+          onclick={() => scrubSimTime('2026-10-28T00:00:00')}
           class="px-2 py-0.5 rounded text-[11px] font-medium bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100">
           -12h
         </button>
         <button 
-          onclick={() => simTime = '2026-10-28T12:00:00'}
+          onclick={() => scrubSimTime('2026-10-28T12:00:00')}
           class="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-600 text-white shadow-xs">
           Baseline (Oct 28)
         </button>
         <button 
-          onclick={() => simTime = '2026-10-29T00:00:00'}
+          onclick={() => scrubSimTime('2026-10-29T00:00:00')}
           class="px-2 py-0.5 rounded text-[11px] font-medium bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100">
           +12h
         </button>
         <button 
-          onclick={() => simTime = '2026-10-29T12:00:00'}
+          onclick={() => scrubSimTime('2026-10-29T12:00:00')}
           class="px-2 py-0.5 rounded text-[11px] font-medium bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100">
           +24h
         </button>
         <button 
-          onclick={() => simTime = '2026-10-30T12:00:00'}
+          onclick={() => scrubSimTime('2026-10-30T12:00:00')}
           class="px-2 py-0.5 rounded text-[11px] font-medium bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100">
           +48h
         </button>
@@ -677,10 +798,10 @@
               tabindex="0"
               onclick={() => selectLead(item.id)}
               onkeydown={(e) => { if (e.key === 'Enter') selectLead(item.id); }}
-              class={`w-full text-left p-3 rounded-lg border transition duration-150 cursor-pointer ${item.railClass} ${
+              class={`group relative w-full text-left p-3 rounded-lg border transition-all duration-200 cursor-pointer hover:-translate-y-0.5 hover:shadow-md ${item.railClass} ${item.urgencyGlowClass} ${
                 isSelected 
-                  ? 'bg-orange-50/70 border-orange-300 dark:bg-orange-950/20 dark:border-orange-800 shadow-sm' 
-                  : 'bg-white hover:bg-warm-100/60 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-850'
+                  ? 'bg-orange-50/80 border-orange-400 dark:bg-orange-950/30 dark:border-orange-700 shadow-sm' 
+                  : 'bg-white hover:bg-warm-100/70 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-850'
               }`}>
               
               <!-- Card Top Row: Sender, Org, Financial/Seat -->
@@ -694,6 +815,9 @@
                       <span class="text-[9px] font-bold px-1 py-0.2 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
                         2x
                       </span>
+                    {/if}
+                    {#if item.urgencyTier <= 1}
+                      <span class="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
                     {/if}
                   </div>
                   {#if (item as any).organization}
@@ -717,10 +841,17 @@
                 </div>
               </div>
 
-              <!-- Stable 2-Line Inbound Message Preview -->
-              <p class="text-xs text-slate-700 dark:text-slate-300 line-clamp-2 my-2 font-bengali leading-relaxed">
+              <!-- Dynamic Peek Message Preview: expands on hover so operator can read full message before opening -->
+              <p class="text-xs text-slate-700 dark:text-slate-300 line-clamp-2 group-hover:line-clamp-none transition-all duration-200 my-2 font-bengali leading-relaxed">
                 "{item.message}"
               </p>
+
+              <!-- Dynamic Hover Metadata Peek: reveals phone, intent, and prompt on hover -->
+              <div class="hidden group-hover:flex items-center justify-between text-[11px] py-1 px-1.5 mb-1.5 rounded bg-warm-100/90 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border border-warm-200 dark:border-slate-700/60 transition-all">
+                <span class="font-mono font-medium">{item.normalized_phone || item.phone || 'No phone'}</span>
+                <span class="text-orange-600 dark:text-orange-400 font-semibold">{item.program_intent || 'General'}</span>
+                <span class="text-[10px] text-slate-400">Focus ↵</span>
+              </div>
 
               <!-- Card Footer: Orthogonal Priority & SLA Pill -->
               <div class="flex items-center justify-between text-[10px] pt-1 border-t border-warm-100 dark:border-slate-800/80">
@@ -735,23 +866,27 @@
                   </span>
                 </div>
 
-                <!-- Compact Combined Priority & SLA Indicator -->
+                <!-- Tiered Urgency Glow Pill -->
                 <div class="flex items-center gap-1 font-mono">
-                  {#if item.businessPriority === 'P0'}
-                    <span class="px-1.5 py-0.5 rounded font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
-                      P0 · {item.sla_formatted}
+                  {#if item.urgencyTier === 0}
+                    <span class="px-1.5 py-0.5 rounded font-bold bg-rose-600 text-white shadow-xs">
+                      {item.urgencyLabel}
                     </span>
-                  {:else if item.is_breached}
-                    <span class="px-1.5 py-0.5 rounded font-medium bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
-                      {item.businessPriority} · Breached
+                  {:else if item.urgencyTier === 1}
+                    <span class="px-1.5 py-0.5 rounded font-semibold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
+                      {item.urgencyLabel}
                     </span>
-                  {:else if item.is_at_risk}
-                    <span class="px-1.5 py-0.5 rounded font-medium bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-                      {item.businessPriority} · {item.sla_formatted}
+                  {:else if item.urgencyTier === 2}
+                    <span class="px-1.5 py-0.5 rounded font-bold bg-orange-500 text-white">
+                      {item.urgencyLabel}
                     </span>
-                  {:else if item.first_response_at}
+                  {:else if item.urgencyTier === 3}
+                    <span class="px-1.5 py-0.5 rounded font-medium bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                      {item.urgencyLabel}
+                    </span>
+                  {:else if item.urgencyTier === 5}
                     <span class="px-1.5 py-0.5 rounded font-medium bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
-                      {item.businessPriority} · Met
+                      SLA Met
                     </span>
                   {:else}
                     <span class="px-1.5 py-0.5 rounded text-slate-500 bg-warm-100 dark:bg-slate-800">
@@ -974,6 +1109,96 @@
       {/if}
     </main>
   </div>
+
+  <!-- Ingest Inbound Message Modal -->
+  {#if showParserModal}
+    <div class="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+      <div class="bg-white dark:bg-slate-900 border border-warm-200 dark:border-slate-800 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4">
+        <div class="flex items-center justify-between border-b border-warm-200 dark:border-slate-800 pb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-orange-600"></span>
+            <h3 class="text-sm font-bold text-slate-900 dark:text-white">Ingest Inbound Inquiry / Webhook</h3>
+          </div>
+          <button 
+            onclick={() => showParserModal = false}
+            class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-sm">
+            ✕
+          </button>
+        </div>
+
+        <div class="space-y-3 text-xs">
+          <div>
+            <label for="ingest-name" class="block text-slate-500 font-medium mb-1">Customer / Sender Name</label>
+            <input 
+              id="ingest-name"
+              type="text" 
+              bind:value={ingestSenderName}
+              class="w-full px-3 py-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-warm-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-orange-600"
+              placeholder="e.g. Tanvir Hossain"
+            />
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label for="ingest-phone" class="block text-slate-500 font-medium mb-1">Phone Number (+880)</label>
+              <input 
+                id="ingest-phone"
+                type="text" 
+                bind:value={ingestPhone}
+                class="w-full px-3 py-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-warm-50 dark:bg-slate-800 text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-1 focus:ring-orange-600"
+                placeholder="+8801712345678"
+              />
+            </div>
+
+            <div>
+              <label for="ingest-channel" class="block text-slate-500 font-medium mb-1">Inbound Channel</label>
+              <select 
+                id="ingest-channel"
+                bind:value={ingestChannel}
+                class="w-full px-3 py-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-warm-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-orange-600">
+                <option value="WhatsApp">WhatsApp</option>
+                <option value="Facebook Messenger">Facebook Messenger</option>
+                <option value="Website form">Website form</option>
+                <option value="Phone call note">Phone call note</option>
+                <option value="Facebook comment">Facebook comment</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label for="ingest-msg" class="block text-slate-500 font-medium mb-1">Raw Customer Inbound Message (Bangla / Banglish / English)</label>
+            <textarea 
+              id="ingest-msg"
+              bind:value={ingestMessage}
+              rows="4"
+              class="w-full p-3 rounded-lg border border-warm-200 dark:border-slate-700 bg-warm-50 dark:bg-slate-800 text-slate-900 dark:text-white font-bengali leading-relaxed focus:outline-none focus:ring-1 focus:ring-orange-600"
+              placeholder="Paste raw customer message..."></textarea>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-2 border-t border-warm-200 dark:border-slate-800">
+          <div class="flex items-center gap-1.5 text-[11px] text-slate-400">
+            <span>Deterministic Triage Engine</span>
+            <span>·</span>
+            <span>Zero Hallucination</span>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button 
+              onclick={() => showParserModal = false}
+              class="px-3 py-1.5 rounded-lg text-slate-600 hover:text-slate-800 dark:text-slate-300 dark:hover:text-white text-xs">
+              Cancel
+            </button>
+            <button 
+              onclick={ingestCustomMessage}
+              class="px-4 py-1.5 rounded-full bg-[#C2410C] hover:bg-[#EA580C] text-white font-semibold text-xs shadow-sm hover:shadow-orange-600/30 active:scale-95 transition">
+              Parse & Ingest Inquiry
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   <!-- Toast Notification Feedback -->
   {#if copyFeedback}
