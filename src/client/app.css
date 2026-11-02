@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    border-color: rgba(218, 215, 205, 0.75);
+  }
+  .dark * {
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #D5D2C7;
+  border-radius: 3px;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #1e293b;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #b0aba0;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* 3-Tier Surface Elevation */
+.canvas-bg {
+  @apply bg-warm-50 dark:bg-slate-950;
+}
+
+.well-bg {
+  @apply bg-warm-100 dark:bg-[#0D1321] border border-warm-200 dark:border-slate-800;
+}
+
+.card-bg {
+  @apply bg-white dark:bg-slate-850 border border-warm-200 dark:border-slate-700/60 shadow-card transition-colors;
+}
+
+/* 3px Left Semantic Urgency Rails (Strict & Restrained) */
+.rail-p0 {
+  border-left: 3px solid #DC2626 !important;
+}
+
+.rail-at-risk {
+  border-left: 3px solid #D97706 !important;
+}
+
+.rail-healthy {
+  border-left: 3px solid transparent !important;
+}
+
+.rail-met {
+  border-left: 3px solid #059669 !important;
+}
+
+/* High-Legibility Bengali Quote Box */
+.bengali-quote {
+  font-family: 'Noto Sans Bengali', 'SolaimanLipi', sans-serif;
+  line-height: 1.65;
+}

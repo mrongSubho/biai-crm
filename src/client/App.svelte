@@ -1,0 +1,984 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { sampleEnquiriesFixture } from '../server/fixtures';
+  import { parseIncomingMessage } from '../lib/engine/parser';
+  import { calculateSlaStatus } from '../lib/engine/sla';
+  import type { ExtractionResult, PipelineStage, Channel } from '../lib/types/crm';
+
+  // --- THEME & VIEWPORT STATE ---
+  let theme = $state<'dark' | 'light'>('light');
+  let viewMode = $state<'inbox' | 'board'>('inbox');
+  let evaluatorMode = $state(false);
+  let showPortalsMenu = $state(false);
+  let showParserModal = $state(false);
+
+  // --- DATA & TRIAGE STATE ---
+  let enquiries = $state([...sampleEnquiriesFixture]);
+  let selectedId = $state<number>(1);
+  let activeQueue = $state<'sales' | 'billing' | 'escalation' | 'careers' | 'spam' | 'all'>('sales');
+  let activeFilter = $state<'all' | 'p0' | 'at_risk' | 'corporate' | 'bangla'>('all');
+  let searchQuery = $state('');
+
+  // Simulation Clock: baseline reference checkpoint
+  let simTime = $state<string>('2026-10-28T12:00:00');
+  let copyFeedback = $state<string | null>(null);
+
+  // Inspector Action State
+  let editableReply = $state('');
+
+  // --- KEYBOARD & THEME INITIALIZATION ---
+  onMount(() => {
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      theme = 'dark';
+      document.documentElement.classList.add('dark');
+      document.documentElement.classList.remove('light');
+    } else {
+      theme = 'light';
+      document.documentElement.classList.add('light');
+      document.documentElement.classList.remove('dark');
+    }
+
+    const handleKeydown = (e: KeyboardEvent) => {
+      // Cmd+K -> Focus Search
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        const searchInput = document.getElementById('global-search') as HTMLInputElement;
+        if (searchInput) searchInput.focus();
+      }
+      // J / K Navigation across conversations
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if (e.key === 'j' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        selectNextLead(1);
+      } else if (e.key === 'k' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        selectNextLead(-1);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeydown);
+    return () => window.removeEventListener('keydown', handleKeydown);
+  });
+
+  function toggleTheme() {
+    theme = theme === 'dark' ? 'light' : 'dark';
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+      document.documentElement.classList.remove('light');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.add('light');
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }
+
+  // --- RECONCILED DATA & ORTHOGONAL SLA EVALUATION ---
+  let evaluatedEnquiries = $derived(
+    enquiries.map(rec => {
+      const effectiveSimTime = evaluatorMode ? simTime : '2026-10-28T12:00:00';
+      const sla = calculateSlaStatus(rec.received_at, rec.first_response_at, effectiveSimTime);
+
+      // Business Priority (Orthogonal to time)
+      let businessPriority: 'P0' | 'P1' | 'P2' | 'P3' = 'P2';
+      let priorityReason = 'Standard Admission Inquiry';
+
+      if (rec.triage_category === 'CRITICAL_ESCALATION' || (rec.flags && rec.flags.includes('PR_RISK'))) {
+        businessPriority = 'P0';
+        priorityReason = 'Public PR Escalation / Refund Threat';
+      } else if (rec.triage_category === 'SUPPORT_BILLING') {
+        businessPriority = 'P1';
+        priorityReason = 'bKash Verification Pending';
+      } else if ((rec.seats && rec.seats >= 10) || rec.is_repeat_sender) {
+        businessPriority = 'P1';
+        priorityReason = rec.seats && rec.seats >= 10 ? `Corporate Account (${rec.seats} seats)` : '2x Repeat Chaser';
+      } else if (rec.triage_category === 'CAREERS_HR') {
+        businessPriority = 'P3';
+        priorityReason = 'Career Applicant';
+      } else if (rec.triage_category === 'SPAM_SECURITY') {
+        businessPriority = 'P3';
+        priorityReason = 'Automated Quarantine';
+      }
+
+      // SLA State
+      const isMet = !!rec.first_response_at;
+      const slaState: 'HEALTHY' | 'AT_RISK' | 'BREACHED' | 'MET' = isMet 
+        ? 'MET' 
+        : sla.isBreached 
+          ? 'BREACHED' 
+          : sla.isAtRisk 
+            ? 'AT_RISK' 
+            : 'HEALTHY';
+
+      // 3px Status Rail Class
+      const railClass = businessPriority === 'P0' || slaState === 'BREACHED' 
+        ? 'rail-p0' 
+        : slaState === 'AT_RISK' || rec.triage_category === 'SUPPORT_BILLING' 
+          ? 'rail-at-risk' 
+          : slaState === 'MET' 
+            ? 'rail-met' 
+            : 'rail-healthy';
+
+      return {
+        ...rec,
+        businessPriority,
+        priorityReason,
+        slaState,
+        railClass,
+        sla_hours_remaining: sla.hoursRemaining,
+        sla_formatted: isMet ? 'SLA Met' : sla.formattedTimeRemaining,
+        is_breached: !isMet && sla.isBreached,
+        is_at_risk: !isMet && sla.isAtRisk
+      };
+    })
+  );
+
+  // Queue & Filter Stream
+  let filteredEnquiries = $derived(
+    evaluatedEnquiries.filter(e => {
+      // 1. Queue Separation
+      if (activeQueue === 'sales' && e.triage_category !== 'SALES_LEAD') return false;
+      if (activeQueue === 'billing' && e.triage_category !== 'SUPPORT_BILLING') return false;
+      if (activeQueue === 'escalation' && e.triage_category !== 'CRITICAL_ESCALATION') return false;
+      if (activeQueue === 'careers' && e.triage_category !== 'CAREERS_HR') return false;
+      if (activeQueue === 'spam' && e.triage_category !== 'SPAM_SECURITY') return false;
+
+      // 2. Saved Quick Filters
+      if (activeFilter === 'p0' && e.businessPriority !== 'P0') return false;
+      if (activeFilter === 'at_risk' && !e.is_at_risk && !e.is_breached) return false;
+      if (activeFilter === 'corporate' && (!e.seats || e.seats < 10)) return false;
+      if (activeFilter === 'bangla' && e.detected_language !== 'BN_SCRIPT') return false;
+
+      // 3. Search Query (sender, organization, phone, message content, ID)
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchesName = e.sender_name?.toLowerCase().includes(q);
+        const matchesOrg = (e as any).organization?.toLowerCase().includes(q);
+        const matchesPhone = e.phone?.includes(q) || e.normalized_phone?.includes(q);
+        const matchesMsg = e.message?.toLowerCase().includes(q);
+        const matchesId = String(e.id) === q || `lead-${e.id}` === q;
+        if (!matchesName && !matchesOrg && !matchesPhone && !matchesMsg && !matchesId) return false;
+      }
+
+      return true;
+    })
+  );
+
+  // Selected Lead (Guaranteed Selection)
+  let selectedEnquiry = $derived(
+    filteredEnquiries.find(e => e.id === selectedId) || 
+    evaluatedEnquiries.find(e => e.id === selectedId) || 
+    filteredEnquiries[0] || 
+    evaluatedEnquiries[0]
+  );
+
+  // Sync draft reply whenever selected enquiry changes
+  $effect(() => {
+    if (selectedEnquiry) {
+      editableReply = selectedEnquiry.suggested_reply || '';
+    }
+  });
+
+  function selectLead(id: number) {
+    selectedId = id;
+  }
+
+  function selectNextLead(delta: number) {
+    const list = filteredEnquiries;
+    if (list.length === 0) return;
+    const currentIndex = list.findIndex(e => e.id === selectedId);
+    let nextIndex = currentIndex + delta;
+    if (nextIndex < 0) nextIndex = 0;
+    if (nextIndex >= list.length) nextIndex = list.length - 1;
+    selectedId = list[nextIndex].id;
+  }
+
+  // --- ACTIONS ---
+  function approveReply(id: number) {
+    enquiries = enquiries.map(e => {
+      if (e.id === id) {
+        return {
+          ...e,
+          first_response_at: new Date().toISOString(),
+          pipeline_stage: 'Contacted' as PipelineStage,
+          reply_status: 'SENT'
+        };
+      }
+      return e;
+    });
+    showFeedback('Outbound response approved & sent. SLA timer met.');
+  }
+
+  function transitionStage(id: number, stage: PipelineStage) {
+    enquiries = enquiries.map(e => {
+      if (e.id === id) {
+        return { ...e, pipeline_stage: stage };
+      }
+      return e;
+    });
+    showFeedback(`Stage transitioned to ${stage}`);
+  }
+
+  function copyToClipboard(text: string, label: string) {
+    navigator.clipboard.writeText(text);
+    showFeedback(`Copied ${label} to clipboard`);
+  }
+
+  function showFeedback(msg: string) {
+    copyFeedback = msg;
+    setTimeout(() => { copyFeedback = null; }, 2500);
+  }
+
+  function exportCsv() {
+    const headers = ['ID', 'Channel', 'Sender', 'Phone', 'Normalized Phone', 'Queue', 'Stage', 'Value BDT', 'Seats', 'SLA Due', 'First Response', 'Message'];
+    const rows = filteredEnquiries.map(e => [
+      e.id,
+      e.channel,
+      `"${e.sender_name}"`,
+      `"${e.phone || ''}"`,
+      `"${e.normalized_phone || ''}"`,
+      e.triage_category,
+      e.pipeline_stage,
+      e.estimated_value_bdt || 0,
+      e.seats || 1,
+      e.sla_due_at,
+      e.first_response_at || '',
+      `"${e.message.replace(/"/g, '""')}"`
+    ]);
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `biai-crm-${activeQueue}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    showFeedback('CSV exported successfully');
+  }
+
+  // --- RECONCILED FINANCIALS & COUNTS ---
+  let salesLeads = $derived(evaluatedEnquiries.filter(e => e.triage_category === 'SALES_LEAD'));
+  let totalPipelineValue = $derived(salesLeads.reduce((s, e) => s + (e.estimated_value_bdt || 0), 0));
+  let totalCorporateSeats = $derived(salesLeads.reduce((s, e) => s + ((e.seats && e.seats > 1) ? e.seats : 0), 0));
+  let atRiskCount = $derived(evaluatedEnquiries.filter(e => e.is_at_risk).length);
+  let breachedCount = $derived(evaluatedEnquiries.filter(e => e.is_breached).length);
+
+  const salesStages: PipelineStage[] = ['New', 'Contacted', 'Qualified', 'Proposal', 'Enrolled'];
+</script>
+
+<!-- APPLICATION CONTAINER -->
+<div class="h-screen w-screen flex flex-col overflow-hidden bg-warm-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 font-sans selection:bg-orange-600 selection:text-white">
+
+  <!-- ======================================================== -->
+  <!-- 1. TOP COMMAND BAR (RESTRAINED BIAI ENTERPRISE HEADER)    -->
+  <!-- ======================================================== -->
+  <header class="h-14 border-b border-warm-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/90 backdrop-blur px-4 flex items-center justify-between gap-4 shrink-0 z-30">
+    
+    <!-- Left: Authentic BIAI Brand Identity & Workspace Switcher -->
+    <div class="flex items-center gap-3">
+      <!-- Official BIAI Circular Woven Emblem -->
+      <img src="/biai-logo.png" alt="Bangladesh Institute of AI" class="w-8 h-8 rounded-full shrink-0 object-contain shadow-xs" />
+
+      <!-- Spaced B I A I Wordmark -->
+      <div class="flex items-center gap-2">
+        <span class="font-bold tracking-[0.25em] text-slate-900 dark:text-white text-sm">B I A I</span>
+        <span class="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-warm-100 text-warm-800 border border-warm-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
+          CRM Triage
+        </span>
+      </div>
+
+      <div class="h-4 w-[1px] bg-warm-200 dark:bg-slate-800 mx-1"></div>
+
+      <!-- Project Workspace Switcher -->
+      <div class="relative">
+        <a 
+          href="/task2" 
+          title="Switch to Corporate Pipeline workspace"
+          class="text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-warm-100 dark:hover:bg-slate-800 transition">
+          <span>Task 1: Omnichannel CRM</span>
+          <svg class="w-3 h-3 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </a>
+      </div>
+    </div>
+
+    <!-- Center: Global Search (Cmd+K) -->
+    <div class="flex-1 max-w-md relative">
+      <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+        <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+      </div>
+      <input 
+        id="global-search"
+        type="text" 
+        bind:value={searchQuery}
+        placeholder="Search sender, company, phone (+880), keyword...  ⌘K"
+        class="w-full text-xs pl-9 pr-14 py-1.5 rounded-lg border border-warm-200 dark:border-slate-800 bg-warm-50/70 dark:bg-slate-950/70 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-orange-600 transition"
+      />
+      {#if searchQuery}
+        <button 
+          onclick={() => searchQuery = ''}
+          class="absolute inset-y-0 right-2 my-auto h-5 px-1.5 text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 flex items-center">
+          ✕ Clear
+        </button>
+      {:else}
+        <kbd class="absolute right-2.5 top-2 text-[10px] text-slate-400 dark:text-slate-500 font-mono pointer-events-none border border-slate-200 dark:border-slate-800 px-1 rounded">⌘K</kbd>
+      {/if}
+    </div>
+
+    <!-- Right: Utility Controls & Primary CTA -->
+    <div class="flex items-center gap-2">
+      <!-- Ecosystem Portals Dropdown -->
+      <div class="relative">
+        <button 
+          onclick={() => showPortalsMenu = !showPortalsMenu}
+          class="text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 px-2.5 py-1.5 rounded hover:bg-warm-100 dark:hover:bg-slate-800 flex items-center gap-1 transition">
+          <span>Portals</span>
+          <svg class="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+        </button>
+
+        {#if showPortalsMenu}
+          <div class="absolute right-0 mt-1 w-48 bg-white dark:bg-slate-900 border border-warm-200 dark:border-slate-800 rounded-lg shadow-lg py-1 z-40 text-xs">
+            <a href="https://biai.com.bd" target="_blank" rel="noopener noreferrer" class="block px-3 py-2 hover:bg-warm-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200">
+              biai.com.bd (Public Site) ↗
+            </a>
+            <a href="https://biai.com.bd/courses" target="_blank" rel="noopener noreferrer" class="block px-3 py-2 hover:bg-warm-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200">
+              Course Catalog & Curricula ↗
+            </a>
+            <a href="https://biai.com.bd" target="_blank" rel="noopener noreferrer" class="block px-3 py-2 hover:bg-warm-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200">
+              For Business (B2B Corporate) ↗
+            </a>
+          </div>
+        {/if}
+      </div>
+
+      <!-- Evaluator Mode Sandbox Toggle -->
+      <button 
+        onclick={() => evaluatorMode = !evaluatorMode}
+        class={`text-xs font-medium px-2.5 py-1.5 rounded-lg border transition flex items-center gap-1.5 ${evaluatorMode ? 'bg-amber-100 border-amber-300 text-amber-900 dark:bg-amber-950/60 dark:border-amber-600 dark:text-amber-300' : 'bg-white text-slate-600 border-warm-200 hover:bg-warm-50 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-800 dark:hover:bg-slate-800'}`}
+        title="Toggle Time Machine evaluation fixture">
+        <span class={`w-1.5 h-1.5 rounded-full ${evaluatorMode ? 'bg-amber-500 animate-pulse' : 'bg-slate-400'}`}></span>
+        <span>Evaluator Mode</span>
+      </button>
+
+      <!-- CSV Export -->
+      <button 
+        onclick={exportCsv}
+        aria-label="Export CSV"
+        title="Export active queue to CSV"
+        class="text-xs text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white p-1.5 rounded hover:bg-warm-100 dark:hover:bg-slate-800 transition">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+      </button>
+
+      <!-- Theme Switcher -->
+      <button 
+        onclick={toggleTheme}
+        aria-label="Toggle theme"
+        title={theme === 'dark' ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
+        class="p-1.5 rounded text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-warm-100 dark:hover:bg-slate-800 transition">
+        {#if theme === 'dark'}
+          <svg class="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+        {:else}
+          <svg class="w-4 h-4 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+        {/if}
+      </button>
+
+      <!-- Primary Action Button (BIAI Burnt Orange Pill) -->
+      <button 
+        onclick={() => showParserModal = true}
+        class="text-xs font-semibold bg-orange-600 hover:bg-orange-500 text-white px-3.5 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm shadow-orange-600/20 active:scale-[0.98] transition">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        <span>+ Ingest Message</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ======================================================== -->
+  <!-- 2. SANDBOXED EVALUATOR BANNER (ONLY WHEN ACTIVE)          -->
+  <!-- ======================================================== -->
+  {#if evaluatorMode}
+    <div class="bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900/60 px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
+      <div class="flex items-center gap-2">
+        <span class="font-bold text-amber-950 dark:text-amber-200 flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+          Evaluation Harness Active
+        </span>
+        <span class="text-amber-800 dark:text-amber-300/80">· Fixture Reference Clock:</span>
+        <span class="font-mono font-bold text-amber-900 dark:text-amber-100 bg-amber-100 dark:bg-amber-900/50 px-2 py-0.5 rounded">
+          {simTime.replace('T', ' ')} (Asia/Dhaka)
+        </span>
+      </div>
+
+      <div class="flex items-center gap-1.5">
+        <span class="text-slate-500 text-[11px] mr-1">Scrub Clock:</span>
+        <button 
+          onclick={() => simTime = '2026-10-27T12:00:00'}
+          class="px-2 py-0.5 rounded text-[11px] font-medium bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100">
+          -24h
+        </button>
+        <button 
+          onclick={() => simTime = '2026-10-28T00:00:00'}
+          class="px-2 py-0.5 rounded text-[11px] font-medium bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100">
+          -12h
+        </button>
+        <button 
+          onclick={() => simTime = '2026-10-28T12:00:00'}
+          class="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-600 text-white shadow-xs">
+          Baseline (Oct 28)
+        </button>
+        <button 
+          onclick={() => simTime = '2026-10-29T00:00:00'}
+          class="px-2 py-0.5 rounded text-[11px] font-medium bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100">
+          +12h
+        </button>
+        <button 
+          onclick={() => simTime = '2026-10-29T12:00:00'}
+          class="px-2 py-0.5 rounded text-[11px] font-medium bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100">
+          +24h
+        </button>
+        <button 
+          onclick={() => simTime = '2026-10-30T12:00:00'}
+          class="px-2 py-0.5 rounded text-[11px] font-medium bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100">
+          +48h
+        </button>
+        <button 
+          onclick={() => { evaluatorMode = false; simTime = '2026-10-28T12:00:00'; }}
+          class="ml-2 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 underline text-[11px]">
+          ✕ Exit
+        </button>
+      </div>
+    </div>
+  {/if}
+
+  <!-- ======================================================== -->
+  <!-- 3. RECONCILED KPI SUMMARY STRIP                           -->
+  <!-- ======================================================== -->
+  <div class="h-9 bg-warm-100/80 dark:bg-slate-900/40 border-b border-warm-200 dark:border-slate-800 px-4 flex items-center justify-between text-xs shrink-0">
+    <div class="flex items-center gap-5 text-slate-600 dark:text-slate-400">
+      <div class="flex items-center gap-1.5">
+        <span>Scope:</span>
+        <span class="font-semibold text-slate-900 dark:text-white capitalize">
+          {activeQueue === 'all' ? 'All Inquiries' : `${activeQueue} Queue`}
+        </span>
+        <span class="text-[11px] text-slate-400">({filteredEnquiries.length} of {evaluatedEnquiries.length} total)</span>
+      </div>
+
+      <div class="h-3.5 w-[1px] bg-warm-300 dark:bg-slate-800"></div>
+
+      <div class="flex items-center gap-1.5">
+        <span>Active Pipeline:</span>
+        <span class="font-bold font-mono text-emerald-700 dark:text-emerald-400">৳ {totalPipelineValue.toLocaleString()} BDT</span>
+        <span class="text-[11px] text-slate-400">(Sales Leads)</span>
+      </div>
+
+      <div class="h-3.5 w-[1px] bg-warm-300 dark:bg-slate-800"></div>
+
+      <div class="flex items-center gap-1.5">
+        <span>Corporate Demand:</span>
+        <span class="font-bold font-mono text-slate-900 dark:text-white">{totalCorporateSeats} Seats</span>
+        <span class="text-[11px] text-slate-400">(Rows #3, #10, #18)</span>
+      </div>
+    </div>
+
+    <!-- SLA Health Pills -->
+    <div class="flex items-center gap-2 font-mono text-[11px]">
+      {#if atRiskCount > 0}
+        <span class="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-300 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-800 flex items-center gap-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+          {atRiskCount} At Risk (&lt;12h)
+        </span>
+      {/if}
+      {#if breachedCount > 0}
+        <span class="px-2 py-0.5 rounded bg-rose-50 text-rose-800 border border-rose-300 dark:bg-rose-950/30 dark:text-rose-300 dark:border-rose-800 flex items-center gap-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+          {breachedCount} SLA Breached
+        </span>
+      {/if}
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- 4. THREE-PANE DESKTOP WORKSPACE (LINEAR / STRIPE GRADE)   -->
+  <!-- ======================================================== -->
+  <div class="flex-1 flex overflow-hidden">
+
+    <!-- ------------------------------------------------------ -->
+    <!-- PANE 1: QUEUE & FILTER NAVIGATION (220px Fixed)        -->
+    <!-- ------------------------------------------------------ -->
+    <aside class="w-56 border-r border-warm-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/50 flex flex-col justify-between shrink-0 overflow-y-auto">
+      <div class="p-3 space-y-4">
+        <!-- Triage Queues -->
+        <div>
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 mb-1.5">
+            Triage Queues
+          </div>
+          <nav class="space-y-0.5 text-xs">
+            <button 
+              onclick={() => activeQueue = 'sales'}
+              class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeQueue === 'sales' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
+              <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                <span>Sales Pipeline</span>
+              </div>
+              <span class="font-mono text-[11px] text-slate-500">
+                {evaluatedEnquiries.filter(e => e.triage_category === 'SALES_LEAD').length}
+              </span>
+            </button>
+
+            <button 
+              onclick={() => activeQueue = 'billing'}
+              class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeQueue === 'billing' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
+              <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+                <span>Billing Verification</span>
+              </div>
+              <span class="font-mono text-[11px] text-slate-500">
+                {evaluatedEnquiries.filter(e => e.triage_category === 'SUPPORT_BILLING').length}
+              </span>
+            </button>
+
+            <button 
+              onclick={() => activeQueue = 'escalation'}
+              class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeQueue === 'escalation' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
+              <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+                <span>P0 Escalations</span>
+              </div>
+              <span class="font-mono text-[11px] text-rose-600 font-bold">
+                {evaluatedEnquiries.filter(e => e.triage_category === 'CRITICAL_ESCALATION').length}
+              </span>
+            </button>
+
+            <button 
+              onclick={() => activeQueue = 'careers'}
+              class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeQueue === 'careers' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
+              <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-sky-500"></span>
+                <span>Careers & HR</span>
+              </div>
+              <span class="font-mono text-[11px] text-slate-500">
+                {evaluatedEnquiries.filter(e => e.triage_category === 'CAREERS_HR').length}
+              </span>
+            </button>
+
+            <button 
+              onclick={() => activeQueue = 'spam'}
+              class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeQueue === 'spam' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
+              <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-slate-400"></span>
+                <span>Quarantined Spam</span>
+              </div>
+              <span class="font-mono text-[11px] text-slate-500">
+                {evaluatedEnquiries.filter(e => e.triage_category === 'SPAM_SECURITY').length}
+              </span>
+            </button>
+
+            <button 
+              onclick={() => activeQueue = 'all'}
+              class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeQueue === 'all' ? 'bg-slate-900 text-white dark:bg-slate-800 dark:text-white font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
+              <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-slate-700 dark:bg-slate-300"></span>
+                <span>All Records</span>
+              </div>
+              <span class="font-mono text-[11px] opacity-80">
+                {evaluatedEnquiries.length}
+              </span>
+            </button>
+          </nav>
+        </div>
+
+        <!-- Saved Focus Filters -->
+        <div>
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 mb-1.5">
+            Quick Filters
+          </div>
+          <div class="space-y-0.5 text-xs">
+            <button 
+              onclick={() => activeFilter = 'all'}
+              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition ${activeFilter === 'all' ? 'text-orange-700 dark:text-orange-300 font-semibold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+              All Inquiries
+            </button>
+            <button 
+              onclick={() => activeFilter = 'p0'}
+              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition ${activeFilter === 'p0' ? 'text-rose-700 dark:text-rose-300 font-semibold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+              🚨 P0 PR Threats
+            </button>
+            <button 
+              onclick={() => activeFilter = 'at_risk'}
+              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition ${activeFilter === 'at_risk' ? 'text-amber-700 dark:text-amber-300 font-semibold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+              ⚠️ At Risk (&lt;12h)
+            </button>
+            <button 
+              onclick={() => activeFilter = 'corporate'}
+              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition ${activeFilter === 'corporate' ? 'text-slate-900 dark:text-white font-semibold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+              🏢 Corporate Whales
+            </button>
+            <button 
+              onclick={() => activeFilter = 'bangla'}
+              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition ${activeFilter === 'bangla' ? 'text-slate-900 dark:text-white font-semibold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+              🇧🇩 Bangla Unicode
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer Info -->
+      <div class="p-3 border-t border-warm-200 dark:border-slate-800 text-[11px] text-slate-400">
+        <div class="flex items-center justify-between">
+          <span>Engine: Cloudflare D1</span>
+          <span class="w-2 h-2 rounded-full bg-emerald-500" title="Edge Isolate Active"></span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ------------------------------------------------------ -->
+    <!-- PANE 2: CONVERSATION / INBOX STREAM (420px Fixed)      -->
+    <!-- ------------------------------------------------------ -->
+    <section class="w-[420px] border-r border-warm-200 dark:border-slate-800 bg-warm-50 dark:bg-slate-950 flex flex-col shrink-0 overflow-hidden">
+      <!-- Stream Header with View Toggle -->
+      <div class="h-10 border-b border-warm-200 dark:border-slate-800 px-3.5 flex items-center justify-between bg-white dark:bg-slate-900 text-xs shrink-0">
+        <div class="flex items-center gap-2 text-slate-500">
+          <span class="font-semibold text-slate-800 dark:text-slate-200">
+            {filteredEnquiries.length} Conversations
+          </span>
+          {#if searchQuery}
+            <span class="text-[11px] text-orange-600">(filtered)</span>
+          {/if}
+        </div>
+
+        <!-- View Switcher: Inbox Stream vs Kanban Board -->
+        <div class="flex items-center gap-1 bg-warm-100 dark:bg-slate-800 p-0.5 rounded-md text-[11px]">
+          <button 
+            onclick={() => viewMode = 'inbox'}
+            class={`px-2 py-0.5 rounded font-medium transition ${viewMode === 'inbox' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}>
+            Inbox
+          </button>
+          <button 
+            onclick={() => viewMode = 'board'}
+            class={`px-2 py-0.5 rounded font-medium transition ${viewMode === 'board' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}>
+            Board
+          </button>
+        </div>
+      </div>
+
+      <!-- Inquiry Cards Scroll Area -->
+      <div class="flex-1 overflow-y-auto p-2.5 space-y-2">
+        {#if filteredEnquiries.length === 0}
+          <div class="py-16 text-center text-slate-400 dark:text-slate-600 text-xs italic">
+            No inquiries match active queue and filters.
+          </div>
+        {:else}
+          {#each filteredEnquiries as item (item.id)}
+            {@const isSelected = selectedEnquiry && selectedEnquiry.id === item.id}
+            
+            <div 
+              role="button"
+              tabindex="0"
+              onclick={() => selectLead(item.id)}
+              onkeydown={(e) => { if (e.key === 'Enter') selectLead(item.id); }}
+              class={`w-full text-left p-3 rounded-lg border transition duration-150 cursor-pointer ${item.railClass} ${
+                isSelected 
+                  ? 'bg-orange-50/70 border-orange-300 dark:bg-orange-950/20 dark:border-orange-800 shadow-sm' 
+                  : 'bg-white hover:bg-warm-100/60 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-850'
+              }`}>
+              
+              <!-- Card Top Row: Sender, Org, Financial/Seat -->
+              <div class="flex items-start justify-between gap-2">
+                <div class="truncate">
+                  <div class="flex items-center gap-1.5">
+                    <span class={`font-semibold text-xs ${isSelected ? 'text-orange-950 dark:text-orange-200' : 'text-slate-900 dark:text-white'}`}>
+                      {item.sender_name}
+                    </span>
+                    {#if item.is_repeat_sender}
+                      <span class="text-[9px] font-bold px-1 py-0.2 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                        2x
+                      </span>
+                    {/if}
+                  </div>
+                  {#if (item as any).organization}
+                    <p class="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                      {(item as any).organization}
+                    </p>
+                  {/if}
+                </div>
+
+                <!-- Financial Value or Seat Count -->
+                <div class="text-right shrink-0">
+                  {#if item.estimated_value_bdt}
+                    <span class="font-mono text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                      ৳ {item.estimated_value_bdt.toLocaleString()}
+                    </span>
+                  {:else if item.seats && item.seats > 1}
+                    <span class="font-mono text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      {item.seats} seats
+                    </span>
+                  {/if}
+                </div>
+              </div>
+
+              <!-- Stable 2-Line Inbound Message Preview -->
+              <p class="text-xs text-slate-700 dark:text-slate-300 line-clamp-2 my-2 font-bengali leading-relaxed">
+                "{item.message}"
+              </p>
+
+              <!-- Card Footer: Orthogonal Priority & SLA Pill -->
+              <div class="flex items-center justify-between text-[10px] pt-1 border-t border-warm-100 dark:border-slate-800/80">
+                <div class="flex items-center gap-2">
+                  <!-- Channel Icon / Name -->
+                  <span class="text-slate-500 font-medium">
+                    {item.channel}
+                  </span>
+                  <span>·</span>
+                  <span class="text-slate-500">
+                    {item.detected_language === 'BN_SCRIPT' ? 'বাংলা' : item.detected_language}
+                  </span>
+                </div>
+
+                <!-- Compact Combined Priority & SLA Indicator -->
+                <div class="flex items-center gap-1 font-mono">
+                  {#if item.businessPriority === 'P0'}
+                    <span class="px-1.5 py-0.5 rounded font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
+                      P0 · {item.sla_formatted}
+                    </span>
+                  {:else if item.is_breached}
+                    <span class="px-1.5 py-0.5 rounded font-medium bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+                      {item.businessPriority} · Breached
+                    </span>
+                  {:else if item.is_at_risk}
+                    <span class="px-1.5 py-0.5 rounded font-medium bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                      {item.businessPriority} · {item.sla_formatted}
+                    </span>
+                  {:else if item.first_response_at}
+                    <span class="px-1.5 py-0.5 rounded font-medium bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+                      {item.businessPriority} · Met
+                    </span>
+                  {:else}
+                    <span class="px-1.5 py-0.5 rounded text-slate-500 bg-warm-100 dark:bg-slate-800">
+                      {item.businessPriority} · {item.sla_formatted}
+                    </span>
+                  {/if}
+                </div>
+              </div>
+            </div>
+          {/each}
+        {/if}
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------------ -->
+    <!-- PANE 3: PERSISTENT LEAD INSPECTOR & AI ACTION STUDIO   -->
+    <!-- ------------------------------------------------------ -->
+    <main class="flex-1 bg-white dark:bg-slate-900 flex flex-col overflow-y-auto">
+      {#if !selectedEnquiry}
+        <div class="m-auto text-center py-20 text-slate-400 text-sm">
+          Select an inquiry from the inbox stream to inspect.
+        </div>
+      {:else}
+        <!-- Inspector Top Header: Contact Identity & Actions -->
+        <div class="p-6 border-b border-warm-200 dark:border-slate-800 flex items-start justify-between gap-4 bg-warm-50/50 dark:bg-slate-900/60">
+          <div>
+            <div class="flex items-center gap-2.5">
+              <h2 class="text-lg font-bold text-slate-900 dark:text-white">
+                {selectedEnquiry.sender_name}
+              </h2>
+
+              <span class={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
+                selectedEnquiry.businessPriority === 'P0' 
+                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300' 
+                  : 'bg-warm-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+              }`}>
+                {selectedEnquiry.businessPriority} · {selectedEnquiry.priorityReason}
+              </span>
+            </div>
+
+            <!-- Organization & Role -->
+            {#if (selectedEnquiry as any).organization}
+              <p class="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                {(selectedEnquiry as any).role ? `${(selectedEnquiry as any).role}, ` : ''}{(selectedEnquiry as any).organization}
+              </p>
+            {/if}
+
+            <!-- Contact Metadata Row -->
+            <div class="flex items-center gap-4 text-xs text-slate-500 dark:text-slate-400 mt-2 font-mono">
+              <span class="flex items-center gap-1">
+                <span>Channel:</span>
+                <span class="font-semibold text-slate-800 dark:text-slate-200">{selectedEnquiry.channel}</span>
+              </span>
+
+              {#if selectedEnquiry.normalized_phone || selectedEnquiry.phone}
+                <span class="flex items-center gap-1">
+                  <span>Phone:</span>
+                  <span class="font-semibold text-slate-800 dark:text-slate-200">
+                    {selectedEnquiry.normalized_phone || selectedEnquiry.phone}
+                  </span>
+                  <button 
+                    onclick={() => copyToClipboard(selectedEnquiry.normalized_phone || selectedEnquiry.phone, 'Phone number')}
+                    class="text-orange-600 hover:text-orange-700 ml-1 text-[11px]"
+                    title="Copy normalized phone number">
+                    📋
+                  </button>
+                </span>
+              {:else}
+                <span class="text-amber-600 font-sans text-[11px]">
+                  ⚠️ Missing Phone Number (Ask in reply)
+                </span>
+              {/if}
+
+              <span>·</span>
+              <span>Received: {selectedEnquiry.received_at}</span>
+            </div>
+          </div>
+
+          <!-- Pipeline Stage Selector Dropdown -->
+          <div class="flex items-center gap-2">
+            <label for="stage-select" class="text-xs text-slate-400">Stage:</label>
+            <select 
+              id="stage-select"
+              value={selectedEnquiry.pipeline_stage}
+              onchange={(e) => transitionStage(selectedEnquiry.id, (e.target as HTMLSelectElement).value as PipelineStage)}
+              class="text-xs font-medium border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-lg px-2.5 py-1.5 focus:ring-1 focus:ring-orange-600 focus:outline-none">
+              {#each salesStages as st}
+                <option value={st}>{st}</option>
+              {/each}
+              <option value="Billing Verified">Billing Verified</option>
+              <option value="Escalated">Escalated</option>
+              <option value="Quarantined">Quarantined</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Inspector Content Body -->
+        <div class="p-6 space-y-6 flex-1">
+
+          <!-- SLA Policy & Pacing Card -->
+          <div class="bg-warm-50 dark:bg-slate-850 p-4 rounded-xl border border-warm-200 dark:border-slate-800 flex items-center justify-between text-xs">
+            <div>
+              <span class="text-slate-500">48-Hour SLA Status:</span>
+              <div class="flex items-center gap-2 mt-1">
+                {#if selectedEnquiry.first_response_at}
+                  <span class="font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    SLA Met (Response Logged {selectedEnquiry.first_response_at.slice(0, 16)})
+                  </span>
+                {:else if selectedEnquiry.is_breached}
+                  <span class="font-semibold text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+                    SLA Breached ({selectedEnquiry.sla_hours_remaining}h overdue)
+                  </span>
+                {:else if selectedEnquiry.is_at_risk}
+                  <span class="font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+                    At Risk ({selectedEnquiry.sla_formatted} remaining)
+                  </span>
+                {:else}
+                  <span class="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    In SLA ({selectedEnquiry.sla_formatted} remaining)
+                  </span>
+                {/if}
+              </div>
+            </div>
+
+            <div class="text-right font-mono text-[11px] text-slate-400">
+              <div>Deadline: {selectedEnquiry.sla_due_at}</div>
+              <div>Timezone: Asia/Dhaka (10am–7pm)</div>
+            </div>
+          </div>
+
+          <!-- Original Customer Inbound Message (Distinct Quote Box) -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                Original Inbound Message
+              </span>
+              <span class="text-[11px] text-slate-400">
+                Language: <strong class="text-slate-700 dark:text-slate-300">{selectedEnquiry.detected_language}</strong> 
+                ({Math.round((selectedEnquiry.language_confidence || 1) * 100)}% confidence)
+              </span>
+            </div>
+
+            <div class="bg-warm-50 dark:bg-slate-950 p-4 rounded-xl border-l-4 border-orange-500 border-t border-r border-b border-warm-200 dark:border-slate-800 text-sm text-slate-800 dark:text-slate-100 font-bengali leading-relaxed">
+              "{selectedEnquiry.message}"
+            </div>
+          </div>
+
+          <!-- AI Dialect-Matched Reply Composer -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  Dialect-Matched Suggested Reply
+                </span>
+                <span class="text-[10px] font-mono bg-orange-100 text-orange-800 dark:bg-orange-950/60 dark:text-orange-300 px-1.5 py-0.5 rounded">
+                  Tone: Respectful Professional
+                </span>
+              </div>
+
+              {#if selectedEnquiry.suggested_reply_alt}
+                <button 
+                  onclick={() => editableReply = selectedEnquiry.suggested_reply_alt}
+                  class="text-[11px] text-orange-600 hover:underline">
+                  Switch to Alt Dialect
+                </button>
+              {/if}
+            </div>
+
+            <textarea 
+              bind:value={editableReply}
+              rows="4"
+              class="w-full text-sm p-3.5 rounded-xl border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-850 text-slate-900 dark:text-slate-100 font-bengali leading-relaxed focus:outline-none focus:ring-1 focus:ring-orange-600"
+              placeholder="Draft your reply..."></textarea>
+
+            <!-- Reply Actions -->
+            <div class="flex items-center justify-between pt-1">
+              <div class="flex items-center gap-2">
+                {#if selectedEnquiry.businessPriority === 'P0'}
+                  <button 
+                    onclick={() => transitionStage(selectedEnquiry.id, 'Escalated' as any)}
+                    class="text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-lg flex items-center gap-1.5 shadow-xs transition">
+                    🚨 Escalate to Supervisor
+                  </button>
+                {/if}
+
+                <button 
+                  onclick={() => copyToClipboard(editableReply, 'Suggested reply')}
+                  class="text-xs font-medium bg-warm-100 hover:bg-warm-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 px-3 py-2 rounded-lg transition">
+                  📋 Copy Reply
+                </button>
+              </div>
+
+              <button 
+                onclick={() => approveReply(selectedEnquiry.id)}
+                class="text-xs font-semibold bg-orange-600 hover:bg-orange-500 text-white px-5 py-2 rounded-full flex items-center gap-2 shadow-sm shadow-orange-600/20 active:scale-[0.98] transition">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                <span>Approve & Send Outbound</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Audit Log Trail -->
+          <div class="pt-4 border-t border-warm-200 dark:border-slate-800">
+            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">
+              Record Audit Lineage
+            </span>
+            <div class="text-[11px] font-mono text-slate-500 space-y-1">
+              <div>• [{selectedEnquiry.received_at}] Ingestion via {selectedEnquiry.channel} webhook (ID: {selectedEnquiry.id})</div>
+              <div>• [{selectedEnquiry.received_at}] Triaged to {selectedEnquiry.triage_category} (Priority: {selectedEnquiry.businessPriority})</div>
+              {#if selectedEnquiry.first_response_at}
+                <div class="text-emerald-600 dark:text-emerald-400">• [{selectedEnquiry.first_response_at.slice(0, 16)}] First outbound response approved (Stage: Contacted)</div>
+              {/if}
+            </div>
+          </div>
+        </div>
+      {/if}
+    </main>
+  </div>
+
+  <!-- Toast Notification Feedback -->
+  {#if copyFeedback}
+    <div class="fixed bottom-4 right-4 bg-slate-900 text-white dark:bg-white dark:text-slate-950 px-4 py-2 rounded-lg text-xs font-medium shadow-lg z-50 animate-bounce">
+      {copyFeedback}
+    </div>
+  {/if}
+</div>

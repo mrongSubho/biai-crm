@@ -1,0 +1,23 @@
+name = "biai-crm"
+main = "src/server/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "biai-crm-db"
+database_id = "7c038dce-7ae2-48bb-9efa-5439cdc373a8"
+migrations_dir = "./migrations"
+
+[ai]
+binding = "AI"
+
+[vars]
+ENVIRONMENT = "development"
+DEFAULT_TIMEZONE = "Asia/Dhaka"
+WORKSPACE_ID = "ws_biai_main"
