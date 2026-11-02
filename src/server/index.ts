@@ -1,8 +1,15 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { parseIncomingMessage } from '../lib/engine/parser.ts';
-import { calculateSlaStatus } from '../lib/engine/sla.ts';
-import type { Channel, PipelineStage, TriageCategory } from '../lib/types/crm.ts';
+import { authMiddleware, requireRole, type AuthenticatedUser } from './auth.ts';
+import { CrmRepository } from './db/repository.ts';
+import {
+  StageTransitionSchema,
+  TicketStatusTransitionSchema,
+  OutboundReplySchema,
+  ParseMessageSchema,
+  EnquiryQuerySchema
+} from './validation.ts';
+import type { PipelineStage } from '../lib/types/crm.ts';
 
 // Cloudflare Worker Environment Bindings
 export interface Env {
@@ -17,42 +24,47 @@ export interface Env {
   GEMINI_API_KEY?: string;
 }
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{
+  Bindings: Env;
+  Variables: { actor: AuthenticatedUser; workspaceId: string };
+}>();
 
-// Enable CORS for development
+// Global middleware
 app.use('*', cors());
+app.use('/api/v1/*', authMiddleware);
+
+// Set of processed webhook IDs to ensure strict idempotency
+const processedWebhookIds = new Set<string>();
 
 // 1. Healthcheck
 app.get('/api/health', (c) => {
   return c.json({
     status: 'healthy',
     runtime: 'Cloudflare Workers (Edge V8 Isolate)',
+    d1_connected: Boolean(c.env?.DB),
     timestamp: new Date().toISOString(),
-    environment: c.env.ENVIRONMENT || 'development',
-    timezone: c.env.DEFAULT_TIMEZONE || 'Asia/Dhaka'
+    environment: c.env?.ENVIRONMENT || 'development',
+    timezone: c.env?.DEFAULT_TIMEZONE || 'Asia/Dhaka'
   });
 });
 
 // 2. Parse Raw Inbound Message (AI & Deterministic Hybrid)
 app.post('/api/v1/enquiries/parse', async (c) => {
   try {
-    const body = await c.req.json();
-    const { content, senderRaw, phoneRaw, channel } = body;
-
-    if (!content || typeof content !== 'string') {
-      return c.json({ error: 'Field "content" is required and must be a string.' }, 400);
+    const body = await c.req.json().catch(() => ({}));
+    const validation = ParseMessageSchema.safeParse(body);
+    if (!validation.success) {
+      return c.json({ error: 'Validation failed', details: validation.error.format() }, 400);
     }
 
-    const extraction = parseIncomingMessage({
-      content,
-      senderRaw: senderRaw || '',
-      phoneRaw: phoneRaw || '',
-      channel: (channel as Channel) || 'WhatsApp'
-    });
+    const { content, senderRaw, phoneRaw, channel } = validation.data;
+    const actor = c.get('actor');
+    const result = await CrmRepository.ingestMessage(c.env?.DB, { content, senderRaw, phoneRaw, channel }, actor);
 
     return c.json({
       success: true,
-      data: extraction,
+      data: result.extraction,
+      record: result.record,
       evaluated_at: new Date().toISOString()
     });
   } catch (err: any) {
@@ -60,167 +72,140 @@ app.post('/api/v1/enquiries/parse', async (c) => {
   }
 });
 
-// 3. In-memory / D1 Fallback Cache for the 20 Sample Enquiries
-// Ensures 100% reliable functionality whether D1 is connected or running in local client-server mode!
-import { sampleEnquiriesFixture } from './fixtures.ts';
-
-let inMemoryRecords: any[] = [...sampleEnquiriesFixture];
-let auditEvents: any[] = [];
-
-// 4. List Enquiries & Tickets
-app.get('/api/v1/enquiries', (c) => {
-  const queue = c.req.query('queue'); // 'all' | 'sales' | 'support' | 'escalation' | 'careers' | 'spam'
-  const stage = c.req.query('stage');
-  const simTime = c.req.query('sim_time'); // Evaluator time-travel clock parameter
-
-  let results = inMemoryRecords.map(rec => {
-    // Dynamically recalculate SLA relative to simulated reference time or current time
-    const sla = calculateSlaStatus(rec.received_at, rec.first_response_at, simTime || null);
-    return {
-      ...rec,
-      sla_status: rec.first_response_at ? 'MET' : sla.status,
-      sla_hours_remaining: sla.hoursRemaining,
-      sla_formatted: rec.first_response_at ? 'SLA Met' : sla.formattedTimeRemaining,
-      is_breached: rec.first_response_at ? false : sla.isBreached,
-      is_at_risk: rec.first_response_at ? false : sla.isAtRisk
-    };
+// 3. List Enquiries & Tickets (with queue, stage, and safe SLA calculations)
+app.get('/api/v1/enquiries', async (c) => {
+  const query = EnquiryQuerySchema.safeParse({
+    queue: c.req.query('queue'),
+    stage: c.req.query('stage'),
+    sim_time: c.req.query('sim_time')
   });
 
-  if (queue && queue !== 'all') {
-    if (queue === 'sales') {
-      results = results.filter(r => r.triage_category === 'SALES_LEAD');
-    } else if (queue === 'support') {
-      results = results.filter(r => r.triage_category === 'SUPPORT_BILLING');
-    } else if (queue === 'escalation') {
-      results = results.filter(r => r.triage_category === 'CRITICAL_ESCALATION');
-    } else if (queue === 'careers') {
-      results = results.filter(r => r.triage_category === 'CAREERS_HR');
-    } else if (queue === 'spam') {
-      results = results.filter(r => r.triage_category === 'SPAM_SECURITY');
-    }
+  if (!query.success) {
+    return c.json({ error: 'Invalid query parameters', details: query.error.format() }, 400);
   }
 
-  if (stage) {
-    results = results.filter(r => r.pipeline_stage === stage);
-  }
+  const { queue, stage, sim_time } = query.data;
+  const env = c.env?.ENVIRONMENT || 'development';
 
-  return c.json({
-    total: results.length,
-    simulated_reference_time: simTime || new Date().toISOString(),
-    data: results
-  });
+  const result = await CrmRepository.getEnquiries(c.env?.DB, queue, stage, sim_time, env);
+  return c.json(result);
 });
 
-// 5. Transition Pipeline Stage
-app.post('/api/v1/enquiries/:id/transition', async (c) => {
+// 4. Transition Sales Pipeline Stage (Strictly Sales Vocabulary)
+app.post('/api/v1/enquiries/:id/stage', async (c) => {
   const id = Number(c.req.param('id'));
-  const body = await c.req.json();
-  const { newStage, userId = 'usr_rep_1' } = body;
+  const body = await c.req.json().catch(() => ({}));
+  const validation = StageTransitionSchema.safeParse(body);
 
-  const record = inMemoryRecords.find(r => r.id === id);
-  if (!record) {
-    return c.json({ error: `Enquiry with ID ${id} not found.` }, 404);
+  if (!validation.success) {
+    return c.json({
+      error: 'Invalid sales stage. Valid pipeline stages are: New, Contacted, Interested, Paid, Lost. For operational status, use /api/v1/enquiries/:id/status.',
+      details: validation.error.format()
+    }, 400);
   }
 
-  const oldStage = record.pipeline_stage;
-  record.pipeline_stage = newStage as PipelineStage;
-  record.updated_at = new Date().toISOString();
+  const { newStage } = validation.data;
+  const actor = c.get('actor');
 
-  // Audit event
-  const auditRow = {
-    id: auditEvents.length + 1,
-    event_type: 'STAGE_TRANSITION',
-    entity_id: id,
-    actor_id: userId,
-    before: oldStage,
-    after: newStage,
-    timestamp: new Date().toISOString()
-  };
-  auditEvents.push(auditRow);
+  try {
+    const result = await CrmRepository.transitionStage(c.env?.DB, id, newStage, actor);
+    return c.json({ success: true, data: result.record, audit: result.audit });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Stage transition failed' }, 400);
+  }
+});
 
-  return c.json({
-    success: true,
-    data: record,
-    audit: auditRow
-  });
+// Backward-compatible transition endpoint (routes to stage or ticket status depending on vocabulary)
+app.post('/api/v1/enquiries/:id/transition', async (c) => {
+  const id = Number(c.req.param('id'));
+  const body = await c.req.json().catch(() => ({}));
+  const { newStage } = body;
+  const actor = c.get('actor');
+
+  if (['Escalated', 'Quarantined', 'Billing Verified', 'Resolved'].includes(newStage)) {
+    const statusMap: Record<string, any> = {
+      'Escalated': 'ESCALATED',
+      'Quarantined': 'QUARANTINED',
+      'Billing Verified': 'RESOLVED',
+      'Resolved': 'RESOLVED'
+    };
+    const result = await CrmRepository.transitionTicketStatus(c.env?.DB, id, statusMap[newStage] || 'ESCALATED', 'Updated via transition', actor);
+    return c.json({ success: true, data: result.record, audit: result.audit });
+  }
+
+  const stageValidation = StageTransitionSchema.safeParse({ newStage });
+  if (!stageValidation.success) {
+    return c.json({ error: 'Invalid stage value', details: stageValidation.error.format() }, 400);
+  }
+
+  try {
+    const result = await CrmRepository.transitionStage(c.env?.DB, id, stageValidation.data.newStage, actor);
+    return c.json({ success: true, data: result.record, audit: result.audit });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Transition failed' }, 400);
+  }
+});
+
+// 5. Transition Operational Ticket Status (Supervisor Escalations, Quarantined, Resolved)
+app.post('/api/v1/enquiries/:id/status', async (c) => {
+  const id = Number(c.req.param('id'));
+  const body = await c.req.json().catch(() => ({}));
+  const validation = TicketStatusTransitionSchema.safeParse(body);
+
+  if (!validation.success) {
+    return c.json({ error: 'Invalid ticket status transition', details: validation.error.format() }, 400);
+  }
+
+  const { newStatus, notes } = validation.data;
+  const actor = c.get('actor');
+
+  try {
+    const result = await CrmRepository.transitionTicketStatus(c.env?.DB, id, newStatus, notes, actor);
+    return c.json({ success: true, data: result.record, audit: result.audit });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Ticket status update failed' }, 400);
+  }
 });
 
 // 6. Approve & Send Outbound Reply
 app.post('/api/v1/enquiries/:id/reply', async (c) => {
   const id = Number(c.req.param('id'));
-  const body = await c.req.json();
-  const { replyText, channel = 'WhatsApp', userId = 'usr_rep_1' } = body;
+  const body = await c.req.json().catch(() => ({}));
+  const validation = OutboundReplySchema.safeParse(body);
 
-  const record = inMemoryRecords.find(r => r.id === id);
-  if (!record) {
-    return c.json({ error: `Enquiry with ID ${id} not found.` }, 404);
+  if (!validation.success) {
+    return c.json({ error: 'Validation failed', details: validation.error.format() }, 400);
   }
 
-  const now = new Date().toISOString();
-  record.first_response_at = now;
-  record.outbound_reply = replyText;
-  record.reply_status = 'SENT';
-  if (record.pipeline_stage === 'New') {
-    record.pipeline_stage = 'Contacted';
+  const { replyText, channel } = validation.data;
+  const actor = c.get('actor');
+
+  try {
+    const result = await CrmRepository.recordOutboundReply(c.env?.DB, id, replyText, channel, actor);
+    return c.json({ success: true, data: result.record, audit: result.audit });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Reply sending failed' }, 400);
   }
-
-  // Audit event
-  const auditRow = {
-    id: auditEvents.length + 1,
-    event_type: 'OUTBOUND_REPLY_SENT',
-    entity_id: id,
-    actor_id: userId,
-    channel,
-    timestamp: now
-  };
-  auditEvents.push(auditRow);
-
-  return c.json({
-    success: true,
-    data: record,
-    audit: auditRow
-  });
 });
 
 // 7. Executive Weekly AI Digest
 app.get('/api/v1/digest', (c) => {
-  // Channel breakdown
-  const channelCounts: Record<string, number> = {};
-  let totalPipelineBdt = 0;
-  let corporateSeats = 0;
-  let unconfirmedPayments = 0;
-  let criticalEscalations = 0;
-  let totalSalesLeads = 0;
-
-  for (const r of inMemoryRecords) {
-    channelCounts[r.channel] = (channelCounts[r.channel] || 0) + 1;
-    if (r.triage_category === 'SALES_LEAD') {
-      totalSalesLeads++;
-      totalPipelineBdt += r.estimated_value_bdt || 0;
-      if (r.program_intent === 'Corporate Training') {
-        corporateSeats += r.seats || 0;
-      }
-    } else if (r.triage_category === 'CRITICAL_ESCALATION') {
-      criticalEscalations++;
-    } else if (r.triage_category === 'SUPPORT_BILLING') {
-      unconfirmedPayments++;
-    }
-  }
+  const metrics = CrmRepository.getDigestMetrics();
 
   return c.json({
     period: '2026-10-26 to 2026-10-28',
-    total_enquiries: inMemoryRecords.length,
+    total_enquiries: metrics.total_enquiries,
     channel_distribution: {
-      whatsapp: channelCounts['WhatsApp'] || 0,
-      facebook_messenger: channelCounts['Facebook Messenger'] || 0,
-      website_form: channelCounts['Website form'] || 0,
-      phone_call_note: channelCounts['Phone call note'] || 0,
-      facebook_comment: channelCounts['Facebook comment'] || 0
+      whatsapp: metrics.channelCounts['WhatsApp'] || 0,
+      facebook_messenger: metrics.channelCounts['Facebook Messenger'] || 0,
+      website_form: metrics.channelCounts['Website form'] || 0,
+      phone_call_note: metrics.channelCounts['Phone call note'] || 0,
+      facebook_comment: metrics.channelCounts['Facebook comment'] || 0
     },
     pipeline_summary: {
-      total_sales_leads: totalSalesLeads,
-      total_estimated_pipeline_bdt: totalPipelineBdt,
-      corporate_seats_requested: corporateSeats,
+      total_sales_leads: metrics.totalSalesLeads,
+      total_estimated_pipeline_bdt: metrics.totalPipelineBdt,
+      corporate_seats_requested: metrics.corporateSeats,
       top_opportunities: [
         { name: 'Kamrul Islam', org: 'Bank in Motijheel', seats: 120, est_value_bdt: 1500000 },
         { name: 'Mahmud Hasan', org: 'Gazipur Textile Company', seats: 40, est_value_bdt: 600000 },
@@ -228,28 +213,97 @@ app.get('/api/v1/digest', (c) => {
       ]
     },
     operational_health: {
-      critical_escalations: criticalEscalations,
-      unconfirmed_payments: unconfirmedPayments,
+      critical_escalations: metrics.criticalEscalations,
+      unconfirmed_payments: metrics.unconfirmedPayments,
       missing_phone_capture_rate: '6 out of 20 (30%) lack phone numbers (100% of FB leads)',
       key_recommendation: 'Deploy automated WhatsApp phone number capture prompt in Facebook Messenger to reduce lead leakage.'
     }
   });
 });
 
-// 8. Meta Webhook Verification (Challenge)
+// 8. Meta Webhook Verification (Challenge GET)
 app.get('/api/webhooks/meta', (c) => {
   const mode = c.req.query('hub.mode');
   const token = c.req.query('hub.verify_token');
   const challenge = c.req.query('hub.challenge');
 
-  const expectedToken = c.env.META_WEBHOOK_VERIFY_TOKEN || 'biai_meta_verify_token_2026';
-  if (mode === 'subscribe' && token === expectedToken) {
+  const expectedToken = c.env?.META_WEBHOOK_VERIFY_TOKEN;
+  if (mode === 'subscribe' && expectedToken && token === expectedToken) {
     return c.text(challenge || '');
   }
-  return c.text('Forbidden', 403);
+  return c.text('Forbidden: Invalid or missing webhook verification token', 403);
 });
 
-// 9. Static Assets fallback for SPA
+// 9. Meta Webhook Signed POST Ingestion with HMAC-SHA256 Verification & Idempotency
+app.post('/api/webhooks/meta', async (c) => {
+  const signatureHeader = c.req.header('X-Hub-Signature-256');
+  const appSecret = c.env?.META_APP_SECRET;
+
+  const rawBody = await c.req.text();
+
+  if (appSecret) {
+    if (!signatureHeader || !signatureHeader.startsWith('sha256=')) {
+      return c.json({ error: 'Missing or malformed X-Hub-Signature-256 header' }, 401);
+    }
+    const signature = signatureHeader.substring(7);
+
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(appSecret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify']
+    );
+
+    const sigBuf = new Uint8Array(signature.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []);
+    const isValid = await crypto.subtle.verify('HMAC', key, sigBuf, encoder.encode(rawBody));
+
+    if (!isValid) {
+      return c.json({ error: 'Invalid HMAC signature' }, 403);
+    }
+  }
+
+  let payload: any;
+  try {
+    payload = JSON.parse(rawBody);
+  } catch {
+    return c.json({ error: 'Invalid JSON payload' }, 400);
+  }
+
+  const entryId = payload?.entry?.[0]?.id || payload?.id || `msg_${Date.now()}`;
+  if (processedWebhookIds.has(entryId)) {
+    return c.json({ status: 'ignored_duplicate', message_id: entryId }, 200);
+  }
+  processedWebhookIds.add(entryId);
+
+  const webhookActor: AuthenticatedUser = {
+    id: 'webhook_meta',
+    workspace_id: c.env?.WORKSPACE_ID || 'ws_biai_main',
+    email: 'webhook@meta.internal',
+    full_name: 'Meta Webhook Dispatcher',
+    role: 'SALES_REP'
+  };
+
+  const messageText = payload?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.text?.body || payload?.text || 'Inbound Webhook Message';
+  const senderPhone = payload?.entry?.[0]?.changes?.[0]?.value?.contacts?.[0]?.wa_id || payload?.from || '';
+  const senderName = payload?.entry?.[0]?.changes?.[0]?.value?.contacts?.[0]?.profile?.name || 'WhatsApp Customer';
+
+  const result = await CrmRepository.ingestMessage(c.env?.DB, {
+    content: messageText,
+    senderRaw: senderName,
+    phoneRaw: senderPhone,
+    channel: 'WhatsApp'
+  }, webhookActor);
+
+  return c.json({
+    status: 'received',
+    record_id: result.record.id,
+    idempotency_key: entryId
+  }, 201);
+});
+
+// 10. Static Assets fallback for SPA
 app.get('*', async (c) => {
   if (c.env.ASSETS) {
     return await c.env.ASSETS.fetch(c.req.raw);

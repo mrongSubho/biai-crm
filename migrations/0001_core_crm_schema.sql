@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL,
     expires_at TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -167,6 +168,7 @@ CREATE TABLE IF NOT EXISTS ai_extractions (
 -- 9. Ground-Truth Versioned Knowledge Base
 CREATE TABLE IF NOT EXISTS knowledge_base (
     id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id),
     program_category TEXT NOT NULL,
     topic TEXT NOT NULL,
     facts_payload_json TEXT NOT NULL,
@@ -179,6 +181,7 @@ CREATE TABLE IF NOT EXISTS knowledge_base (
 -- 10. Entity Merges Ledger (Deduplication Audit Trail)
 CREATE TABLE IF NOT EXISTS contact_merges (
     id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id),
     canonical_contact_id TEXT NOT NULL REFERENCES contacts(id),
     merged_contact_id TEXT NOT NULL,
     match_rule TEXT NOT NULL, -- 'EXACT_PHONE' | 'FUZZY_NAME_MANUAL'
@@ -187,19 +190,33 @@ CREATE TABLE IF NOT EXISTS contact_merges (
     merged_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- 11. Immutable Audit Ledger
+-- 11. Immutable Audit Ledger (Append-Only)
 CREATE TABLE IF NOT EXISTS audit_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     workspace_id TEXT NOT NULL,
     actor_id TEXT NOT NULL,
+    actor_type TEXT NOT NULL DEFAULT 'USER' CHECK (actor_type IN ('USER', 'SYSTEM', 'WEBHOOK')),
     actor_role TEXT NOT NULL,
-    event_type TEXT NOT NULL, -- 'STAGE_TRANSITION' | 'REPLY_APPROVED' | 'CONTACT_MERGED' | 'INBOUND_INGEST'
+    event_type TEXT NOT NULL, -- 'STAGE_TRANSITION' | 'TICKET_STATUS_UPDATED' | 'REPLY_APPROVED' | 'CONTACT_MERGED' | 'INBOUND_INGEST'
     entity_type TEXT NOT NULL,
     entity_id TEXT NOT NULL,
     before_state_json TEXT,
     after_state_json TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Immutability Triggers for audit_events
+CREATE TRIGGER IF NOT EXISTS trg_audit_events_crm_no_update
+BEFORE UPDATE ON audit_events
+BEGIN
+    SELECT RAISE(FAIL, 'audit_events is append-only and cannot be updated');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_audit_events_crm_no_delete
+BEFORE DELETE ON audit_events
+BEGIN
+    SELECT RAISE(FAIL, 'audit_events is append-only and cannot be deleted');
+END;
 
 -- 12. SQLite FTS5 Full-Text Search Virtual Table
 CREATE VIRTUAL TABLE IF NOT EXISTS fts_messages USING fts5(

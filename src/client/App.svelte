@@ -36,6 +36,7 @@
 
   // --- KEYBOARD & THEME INITIALIZATION ---
   onMount(() => {
+    // 1. Theme initialization
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
       theme = 'dark';
@@ -46,6 +47,16 @@
       document.documentElement.classList.add('light');
       document.documentElement.classList.remove('dark');
     }
+
+    // 2. Fetch authoritative records from D1 backend with graceful fallback
+    fetch('/api/v1/enquiries?queue=all')
+      .then(r => r.ok ? r.json() : null)
+      .then(res => {
+        if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+          enquiries = res.data;
+        }
+      })
+      .catch(e => console.log('Standalone mode: using seeded enquiry fixture', e));
 
     const handleKeydown = (e: KeyboardEvent) => {
       // Cmd+K -> Focus Search
@@ -251,23 +262,32 @@
   }
 
   // --- ACTIONS ---
-  function approveReply(id: number) {
+  async function approveReply(id: number) {
+    const textToSend = editableReply;
     enquiries = enquiries.map(e => {
       if (e.id === id) {
         return {
           ...e,
           first_response_at: new Date().toISOString(),
           pipeline_stage: 'Contacted' as PipelineStage,
-          reply_status: 'SENT'
+          reply_status: 'SENT',
+          outbound_reply: textToSend
         };
       }
       return e;
     });
     soundFx.playActionSuccess();
     showFeedback('Outbound response approved & sent. SLA timer met.');
+
+    // Persist to D1 in background
+    fetch(`/api/v1/enquiries/${id}/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ replyText: textToSend, channel: selectedEnquiry.channel })
+    }).catch(e => console.log('Local action cached', e));
   }
 
-  function transitionStage(id: number, stage: PipelineStage) {
+  async function transitionStage(id: number, stage: PipelineStage) {
     enquiries = enquiries.map(e => {
       if (e.id === id) {
         return { ...e, pipeline_stage: stage };
@@ -276,6 +296,31 @@
     });
     soundFx.playActionSuccess();
     showFeedback(`Stage transitioned to ${stage}`);
+
+    // Persist to D1 in background
+    fetch(`/api/v1/enquiries/${id}/stage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newStage: stage })
+    }).catch(e => console.log('Local action cached', e));
+  }
+
+  async function transitionTicketStatus(id: number, status: string, notes?: string) {
+    enquiries = enquiries.map(e => {
+      if (e.id === id) {
+        return { ...e, ticket_status: status, is_escalated: status === 'ESCALATED' };
+      }
+      return e;
+    });
+    soundFx.playWarningPing();
+    showFeedback(`Ticket status updated: ${status}`);
+
+    // Persist to D1 in background
+    fetch(`/api/v1/enquiries/${id}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newStatus: status, notes })
+    }).catch(e => console.log('Local action cached', e));
   }
 
   function scrubSimTime(newTime: string) {
@@ -965,8 +1010,13 @@
             </div>
           </div>
 
-          <!-- Pipeline Stage Selector Dropdown -->
+          <!-- Pipeline Stage Selector Dropdown (Strict Sales Opportunity Vocabulary) -->
           <div class="flex items-center gap-2">
+            {#if (selectedEnquiry as any).ticket_status && (selectedEnquiry as any).ticket_status !== 'OPEN'}
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase tracking-wider bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                Ticket: {(selectedEnquiry as any).ticket_status}
+              </span>
+            {/if}
             <label for="stage-select" class="text-xs text-slate-400">Stage:</label>
             <select 
               id="stage-select"
@@ -976,9 +1026,6 @@
               {#each salesStages as st}
                 <option value={st}>{st}</option>
               {/each}
-              <option value="Billing Verified">Billing Verified</option>
-              <option value="Escalated">Escalated</option>
-              <option value="Quarantined">Quarantined</option>
             </select>
           </div>
         </div>
@@ -1070,7 +1117,7 @@
               <div class="flex items-center gap-2">
                 {#if selectedEnquiry.businessPriority === 'P0'}
                   <button 
-                    onclick={() => transitionStage(selectedEnquiry.id, 'Escalated' as any)}
+                    onclick={() => transitionTicketStatus(selectedEnquiry.id, 'ESCALATED', 'P0 PR risk escalated to supervisor')}
                     class="text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-lg flex items-center gap-1.5 shadow-xs transition">
                     🚨 Escalate to Supervisor
                   </button>

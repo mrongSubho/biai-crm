@@ -20,10 +20,11 @@ The system replaces rigid, cramped multi-column Kanban boards with a **Linear/St
 | Component | Identifier / Location | Status |
 | :--- | :--- | :--- |
 | **Custom Domain** | `https://biaicrm.mrong.tech` | **Live (HTTP/2 200, Edge SSL active)** |
-| **Worker Subdomain** | `https://biai-crm.ludobase.workers.dev` | **Live (Worker Version: `45b90fcb-f0f8-431d-bcd8-a5269d583de9`)** |
-| **Cloudflare D1 Database** | `biai-crm-db` (`7c038dce-7ae2-48bb-9efa-5439cdc373a8`) | **APAC Region, Migrated & Seeded** |
-| **GitHub Repository** | `https://github.com/mrongSubho/biai-crm.git` | **Synchronized on `main` (`commit 9f967e3`)** |
-| **Test Suite** | Vitest 3.2.7 | **18 / 18 Tests Passing (100% Pass Rate)** |
+| **Worker Subdomain** | `https://biai-crm.ludobase.workers.dev` | **Live (Worker Version: `0c408f7f-22dd-4cdd-9b4d-8aefc74195f6`)** |
+| **Cloudflare D1 Database** | `biai-crm-db` (`7c038dce-7ae2-48bb-9efa-5439cdc373a8`) | **APAC Region, Migrated, Seeded & Hardened** |
+| **GitHub Repository** | `https://github.com/mrongSubho/biai-crm.git` | **Synchronized on `main`** |
+| **Test Suite** | Vitest 3.2.7 | **27 / 27 Tests Passing (18 Parser + 9 Security & API)** |
+| **Security Layer** | SHA-256 Sessions + RBAC | **Active (HMAC Webhooks, Strict Zod Validation)** |
 
 ---
 

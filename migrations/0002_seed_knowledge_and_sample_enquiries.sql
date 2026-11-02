@@ -14,14 +14,21 @@ VALUES
   ('usr_rep_1', 'ws_biai_main', 'tanvir@biai.com.bd', 'Tanvir Islam', 'SALES_REP', 'argon2id_mock_hash_rep', 1),
   ('usr_sup_1', 'ws_biai_main', 'supervisor@biai.com.bd', 'Nasreen Khan', 'SUPERVISOR', 'argon2id_mock_hash_sup', 1);
 
+-- 2.1 Staff Active Sessions (Pre-seeded hashed sessions)
+INSERT OR IGNORE INTO sessions (id, user_id, token_hash, expires_at)
+VALUES
+  ('sess_crm_admin', 'usr_admin_1', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', '2030-01-01 00:00:00'),
+  ('sess_crm_rep', 'usr_rep_1', '04f8996da763b7a969b1028ee3007569eaf3a635486ddab211d512c85b9df8fb', '2030-01-01 00:00:00'),
+  ('sess_crm_sup', 'usr_sup_1', '4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce', '2030-01-01 00:00:00');
+
 -- 3. Versioned Ground-Truth Knowledge Base
-INSERT OR IGNORE INTO knowledge_base (id, program_category, topic, facts_payload_json, version, is_active, published_by)
+INSERT OR IGNORE INTO knowledge_base (id, workspace_id, program_category, topic, facts_payload_json, version, is_active, published_by)
 VALUES 
-  ('kb_bootcamp', 'Bootcamp', '3-Day AI Bootcamp Details', '{"title":"3-Day AI Bootcamp","duration":"3 Days (Fri-Sun)","mode":"Live Online Zoom + Lifetime Recordings","price_bdt":3500,"payment_methods":["bKash","Nagad","Credit/Debit Card"],"curriculum":["Prompt Engineering","Workflow Automation with n8n","AI Coding with Cursor"],"certification":"BIAI Verified Certificate"}', 1, 1, 'usr_admin_1'),
-  ('kb_fellowship', 'Fellowship', 'AI Executive Fellowship', '{"title":"AI Fellowship Program","duration":"12 Weeks","target_audience":"Professionals & Non-technical Managers","price_bdt":25000,"instalments_allowed":true,"instalment_terms":"2 instalments of 12,500 BDT","certification":"Govt-approved & Industry-recognized BIAI Executive Credential"}', 1, 1, 'usr_admin_1'),
-  ('kb_corporate', 'Corporate Training', 'B2B Enterprise Upskilling', '{"title":"BIAI Corporate AI Training","min_team_size":10,"delivery_options":["Onsite at client premises","Online interactive cohort"],"group_discounts":{"10_25_seats":"15% group discount","26_50_seats":"25% group discount","50_plus_seats":"Custom enterprise quote"},"locations":["Dhaka (Motijheel, Gulshan, Mirpur)","Gazipur","Chattogram"]}', 1, 1, 'usr_admin_1'),
-  ('kb_masterclass', 'Free Masterclass', 'Community Masterclass', '{"title":"BIAI Free AI Masterclass","fee_bdt":0,"eligibility":"Open to all including high school students (Class 9 and above)","mode":"Zoom Live"}', 1, 1, 'usr_admin_1'),
-  ('kb_refund_policy', 'General', 'Refund & Cancellation Policy', '{"full_refund_window":"Up to 48 hours before cohort start date","post_start_refund":"Non-refundable once classes commence","processing_time":"3-5 business days via original payment method"}', 1, 1, 'usr_admin_1');
+  ('kb_bootcamp', 'ws_biai_main', 'Bootcamp', '3-Day AI Bootcamp Details', '{"title":"3-Day AI Bootcamp","duration":"3 Days (Fri-Sun)","mode":"Live Online Zoom + Lifetime Recordings","price_bdt":3500,"payment_methods":["bKash","Nagad","Credit/Debit Card"],"curriculum":["Prompt Engineering","Workflow Automation with n8n","AI Coding with Cursor"],"certification":"BIAI Verified Certificate"}', 1, 1, 'usr_admin_1'),
+  ('kb_fellowship', 'ws_biai_main', 'Fellowship', 'AI Executive Fellowship', '{"title":"AI Fellowship Program","duration":"12 Weeks","target_audience":"Professionals & Non-technical Managers","price_bdt":25000,"instalments_allowed":true,"instalment_terms":"2 instalments of 12,500 BDT","certification":"Govt-approved & Industry-recognized BIAI Executive Credential"}', 1, 1, 'usr_admin_1'),
+  ('kb_corporate', 'ws_biai_main', 'Corporate Training', 'B2B Enterprise Upskilling', '{"title":"BIAI Corporate AI Training","min_team_size":10,"delivery_options":["Onsite at client premises","Online interactive cohort"],"group_discounts":{"10_25_seats":"15% group discount","26_50_seats":"25% group discount","50_plus_seats":"Custom enterprise quote"},"locations":["Dhaka (Motijheel, Gulshan, Mirpur)","Gazipur","Chattogram"]}', 1, 1, 'usr_admin_1'),
+  ('kb_masterclass', 'ws_biai_main', 'Free Masterclass', 'Community Masterclass', '{"title":"BIAI Free AI Masterclass","fee_bdt":0,"eligibility":"Open to all including high school students (Class 9 and above)","mode":"Zoom Live"}', 1, 1, 'usr_admin_1'),
+  ('kb_refund_policy', 'ws_biai_main', 'General', 'Refund & Cancellation Policy', '{"full_refund_window":"Up to 48 hours before cohort start date","post_start_refund":"Non-refundable once classes commence","processing_time":"3-5 business days via original payment method"}', 1, 1, 'usr_admin_1');
 
 -- 4. Canonical Contacts (Deduplicated)
 INSERT OR IGNORE INTO contacts (id, workspace_id, name, organization, role, primary_phone, normalized_phone, primary_channel, preferred_language, total_messages, first_seen_at, last_seen_at)
