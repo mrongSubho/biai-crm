@@ -148,7 +148,7 @@
 
       if (isMet) {
         urgencyTier = 5;
-        urgencyLabel = 'SLA Met';
+        urgencyLabel = '✓ SLA Met';
         urgencyRailClass = 'rail-met';
         urgencyGlowClass = 'border-slate-200 dark:border-slate-800';
       } else if (sla.isBreached || businessPriority === 'P0') {
@@ -156,26 +156,26 @@
         if (overdueHours >= 2 || businessPriority === 'P0') {
           urgencyTier = 0; // > 2h overdue or P0 PR threat
           urgencyLabel = businessPriority === 'P0' 
-            ? 'P0 · Critical Risk' 
-            : `Overdue ${Math.round(overdueHours)}h`;
-          urgencyGlowClass = 'border-red-500/80 shadow-[0_0_14px_rgba(220,38,38,0.35)] animate-pulse bg-red-50/40 dark:bg-red-950/20';
+            ? '🚨 P0 · CRITICAL' 
+            : `🚨 OVERDUE ${Math.round(overdueHours)}h`;
+          urgencyGlowClass = 'border-red-600 shadow-[0_0_18px_rgba(220,38,38,0.45)] ring-2 ring-red-500/60 animate-pulse bg-red-50/50 dark:bg-red-950/30';
           urgencyRailClass = 'rail-p0';
         } else {
           urgencyTier = 1; // 1h - 2h overdue
-          urgencyLabel = `Overdue ${Math.round(overdueHours)}h`;
-          urgencyGlowClass = 'border-rose-400/80 shadow-[0_0_10px_rgba(225,29,72,0.25)] bg-rose-50/30 dark:bg-rose-950/15';
+          urgencyLabel = `⚠️ OVERDUE ${Math.round(overdueHours)}h`;
+          urgencyGlowClass = 'border-rose-500 shadow-[0_0_14px_rgba(225,29,72,0.35)] ring-1 ring-rose-400/50 bg-rose-50/40 dark:bg-rose-950/20';
           urgencyRailClass = 'rail-p0';
         }
       } else if (sla.hoursRemaining <= 1) {
         urgencyTier = 2; // < 1h remaining (Critical Imminent Breach)
         const mins = Math.max(1, Math.round(sla.hoursRemaining * 60));
-        urgencyLabel = `CRITICAL · ${mins}m left`;
-        urgencyGlowClass = 'border-orange-500/80 shadow-[0_0_12px_rgba(234,88,12,0.35)] animate-pulse bg-orange-50/30 dark:bg-orange-950/20';
+        urgencyLabel = `🔥 CRITICAL · ${mins}m LEFT`;
+        urgencyGlowClass = 'border-orange-500 shadow-[0_0_14px_rgba(234,88,12,0.4)] ring-1 ring-orange-500/60 animate-pulse bg-orange-50/40 dark:bg-orange-950/25';
         urgencyRailClass = 'rail-at-risk';
       } else if (sla.hoursRemaining <= 3) {
         urgencyTier = 3; // 1h - 3h remaining (At Risk Warning)
-        urgencyLabel = `At Risk · ${Math.round(sla.hoursRemaining)}h left`;
-        urgencyGlowClass = 'border-amber-400/60 shadow-[0_0_8px_rgba(217,119,6,0.2)] bg-amber-50/20 dark:bg-amber-950/10';
+        urgencyLabel = `⏳ At Risk · ${Math.round(sla.hoursRemaining)}h left`;
+        urgencyGlowClass = 'border-amber-400 shadow-[0_0_10px_rgba(217,119,6,0.3)] ring-1 ring-amber-400/40 bg-amber-50/30 dark:bg-amber-950/15';
         urgencyRailClass = 'rail-at-risk';
       } else {
         urgencyTier = 4; // Healthy (> 3h)
@@ -249,6 +249,14 @@
 
   function selectLead(id: number) {
     selectedId = id;
+    const item = evaluatedEnquiries.find(e => e.id === id);
+    if (item) {
+      if (item.urgencyTier === 0) {
+        soundFx.playEmergencyAlert();
+      } else if (item.urgencyTier === 1 || item.urgencyTier === 2 || item.urgencyTier === 3) {
+        soundFx.playWarningPing();
+      }
+    }
   }
 
   function selectNextLead(delta: number) {
@@ -258,7 +266,7 @@
     let nextIndex = currentIndex + delta;
     if (nextIndex < 0) nextIndex = 0;
     if (nextIndex >= list.length) nextIndex = list.length - 1;
-    selectedId = list[nextIndex].id;
+    selectLead(list[nextIndex].id);
   }
 
   // --- ACTIONS ---
@@ -423,7 +431,7 @@
   let atRiskCount = $derived(evaluatedEnquiries.filter(e => e.is_at_risk).length);
   let breachedCount = $derived(evaluatedEnquiries.filter(e => e.is_breached).length);
 
-  const salesStages: PipelineStage[] = ['New', 'Contacted', 'Qualified', 'Proposal', 'Enrolled'];
+  const salesStages: PipelineStage[] = ['New', 'Contacted', 'Interested', 'Paid', 'Lost'];
 </script>
 
 <!-- APPLICATION CONTAINER -->
@@ -799,157 +807,254 @@
     </aside>
 
     <!-- ------------------------------------------------------ -->
-    <!-- PANE 2: CONVERSATION / INBOX STREAM (420px Fixed)      -->
+    <!-- PANE 2: CONVERSATION STREAM OR KANBAN BOARD            -->
     <!-- ------------------------------------------------------ -->
-    <section class="w-[420px] border-r border-warm-200 dark:border-slate-800 bg-warm-50 dark:bg-slate-950 flex flex-col shrink-0 overflow-hidden">
-      <!-- Stream Header with View Toggle -->
-      <div class="h-10 border-b border-warm-200 dark:border-slate-800 px-3.5 flex items-center justify-between bg-white dark:bg-slate-900 text-xs shrink-0">
-        <div class="flex items-center gap-2 text-slate-500">
-          <span class="font-semibold text-slate-800 dark:text-slate-200">
-            {filteredEnquiries.length} Conversations
-          </span>
-          {#if searchQuery}
-            <span class="text-[11px] text-orange-600">(filtered)</span>
-          {/if}
-        </div>
-
-        <!-- View Switcher: Inbox Stream vs Kanban Board -->
-        <div class="flex items-center gap-1 bg-warm-100 dark:bg-slate-800 p-0.5 rounded-md text-[11px]">
-          <button 
-            onclick={() => viewMode = 'inbox'}
-            class={`px-2 py-0.5 rounded font-medium transition ${viewMode === 'inbox' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}>
-            Inbox
-          </button>
-          <button 
-            onclick={() => viewMode = 'board'}
-            class={`px-2 py-0.5 rounded font-medium transition ${viewMode === 'board' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}>
-            Board
-          </button>
-        </div>
-      </div>
-
-      <!-- Inquiry Cards Scroll Area -->
-      <div class="flex-1 overflow-y-auto p-2.5 space-y-2">
-        {#if filteredEnquiries.length === 0}
-          <div class="py-16 text-center text-slate-400 dark:text-slate-600 text-xs italic">
-            No inquiries match active queue and filters.
+    {#if viewMode === 'inbox'}
+      <section class="w-[420px] border-r border-warm-200 dark:border-slate-800 bg-warm-50 dark:bg-slate-950 flex flex-col shrink-0 overflow-hidden">
+        <!-- Stream Header with View Toggle -->
+        <div class="h-10 border-b border-warm-200 dark:border-slate-800 px-3.5 flex items-center justify-between bg-white dark:bg-slate-900 text-xs shrink-0">
+          <div class="flex items-center gap-2 text-slate-500">
+            <span class="font-semibold text-slate-800 dark:text-slate-200">
+              {filteredEnquiries.length} Conversations
+            </span>
+            {#if searchQuery}
+              <span class="text-[11px] text-orange-600">(filtered)</span>
+            {/if}
           </div>
-        {:else}
-          {#each filteredEnquiries as item (item.id)}
-            {@const isSelected = selectedEnquiry && selectedEnquiry.id === item.id}
-            
-            <div 
-              role="button"
-              tabindex="0"
-              onclick={() => selectLead(item.id)}
-              onkeydown={(e) => { if (e.key === 'Enter') selectLead(item.id); }}
-              class={`group relative w-full text-left p-3 rounded-lg border transition-all duration-200 cursor-pointer hover:-translate-y-0.5 hover:shadow-md ${item.railClass} ${item.urgencyGlowClass} ${
-                isSelected 
-                  ? 'bg-orange-50/80 border-orange-400 dark:bg-orange-950/30 dark:border-orange-700 shadow-sm' 
-                  : 'bg-white hover:bg-warm-100/70 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-850'
-              }`}>
+
+          <!-- View Switcher: Inbox Stream vs Kanban Board -->
+          <div class="flex items-center gap-1 bg-warm-100 dark:bg-slate-800 p-0.5 rounded-md text-[11px]">
+            <button 
+              onclick={() => viewMode = 'inbox'}
+              class="px-2 py-0.5 rounded font-medium transition bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs">
+              Inbox
+            </button>
+            <button 
+              onclick={() => viewMode = 'board'}
+              class="px-2 py-0.5 rounded font-medium transition text-slate-500 hover:text-slate-800">
+              Board
+            </button>
+          </div>
+        </div>
+
+        <!-- Inquiry Cards Scroll Area -->
+        <div class="flex-1 overflow-y-auto p-2.5 space-y-2.5">
+          {#if filteredEnquiries.length === 0}
+            <div class="py-16 text-center text-slate-400 dark:text-slate-600 text-xs italic">
+              No inquiries match active queue and filters.
+            </div>
+          {:else}
+            {#each filteredEnquiries as item (item.id)}
+              {@const isSelected = selectedEnquiry && selectedEnquiry.id === item.id}
               
-              <!-- Card Top Row: Sender, Org, Financial/Seat -->
-              <div class="flex items-start justify-between gap-2">
-                <div class="truncate">
-                  <div class="flex items-center gap-1.5">
-                    <span class={`font-semibold text-xs ${isSelected ? 'text-orange-950 dark:text-orange-200' : 'text-slate-900 dark:text-white'}`}>
-                      {item.sender_name}
-                    </span>
-                    {#if item.is_repeat_sender}
-                      <span class="text-[9px] font-bold px-1 py-0.2 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
-                        2x
+              <div 
+                role="button"
+                tabindex="0"
+                onclick={() => selectLead(item.id)}
+                onkeydown={(e) => { if (e.key === 'Enter') selectLead(item.id); }}
+                class={`group relative w-full text-left p-3.5 rounded-xl border transition-all duration-200 cursor-pointer hover:scale-[1.025] hover:-translate-y-1 hover:shadow-xl hover:z-30 origin-center ${item.railClass} ${item.urgencyGlowClass} ${
+                  isSelected 
+                    ? 'bg-orange-50/80 border-orange-400 dark:bg-orange-950/30 dark:border-orange-700 shadow-sm' 
+                    : 'bg-white hover:bg-warm-100/70 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-850'
+                }`}>
+                
+                <!-- Card Top Row: Sender, Org, Financial/Seat -->
+                <div class="flex items-start justify-between gap-2">
+                  <div class="truncate">
+                    <div class="flex items-center gap-1.5">
+                      <span class={`font-semibold text-xs ${isSelected ? 'text-orange-950 dark:text-orange-200' : 'text-slate-900 dark:text-white'}`}>
+                        {item.sender_name}
                       </span>
-                    {/if}
-                    {#if item.urgencyTier <= 1}
-                      <span class="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+                      {#if item.is_repeat_sender}
+                        <span class="text-[9px] font-bold px-1 py-0.2 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                          2x
+                        </span>
+                      {/if}
+                      {#if item.urgencyTier <= 1}
+                        <span class="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+                      {/if}
+                    </div>
+                    {#if (item as any).organization}
+                      <p class="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                        {(item as any).organization}
+                      </p>
                     {/if}
                   </div>
-                  {#if (item as any).organization}
-                    <p class="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
-                      {(item as any).organization}
-                    </p>
-                  {/if}
+
+                  <!-- Financial Value or Seat Count -->
+                  <div class="text-right shrink-0">
+                    {#if item.estimated_value_bdt}
+                      <span class="font-mono text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                        ৳ {item.estimated_value_bdt.toLocaleString()}
+                      </span>
+                    {:else if item.seats && item.seats > 1}
+                      <span class="font-mono text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        {item.seats} seats
+                      </span>
+                    {/if}
+                  </div>
                 </div>
 
-                <!-- Financial Value or Seat Count -->
-                <div class="text-right shrink-0">
-                  {#if item.estimated_value_bdt}
-                    <span class="font-mono text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-                      ৳ {item.estimated_value_bdt.toLocaleString()}
+                <!-- Dynamic Zoom & Content Expansion: expands on hover so operator can read full message before opening -->
+                <p class="text-xs text-slate-700 dark:text-slate-300 line-clamp-2 group-hover:line-clamp-none transition-all duration-200 my-2 font-bengali leading-relaxed group-hover:text-[13.5px] group-hover:text-slate-950 dark:group-hover:text-white">
+                  "{item.message}"
+                </p>
+
+                <!-- Dynamic Hover Metadata Peek: reveals phone, intent, and prompt on hover -->
+                <div class="hidden group-hover:flex items-center justify-between text-[11px] py-1 px-2 mb-1.5 rounded-lg bg-warm-100/95 dark:bg-slate-800/90 text-slate-700 dark:text-slate-200 border border-warm-200 dark:border-slate-700 shadow-xs transition-all">
+                  <span class="font-mono font-medium">{item.normalized_phone || item.phone || 'No phone'}</span>
+                  <span class="text-orange-600 dark:text-orange-400 font-semibold">{item.program_intent || 'General'}</span>
+                  <span class="text-[10px] text-slate-400 font-mono">↵ Inspect</span>
+                </div>
+
+                <!-- Card Footer: Orthogonal Priority & SLA Pill -->
+                <div class="flex items-center justify-between text-[10px] pt-1.5 border-t border-warm-100 dark:border-slate-800/80">
+                  <div class="flex items-center gap-2">
+                    <!-- Channel Icon / Name -->
+                    <span class="text-slate-500 font-medium">
+                      {item.channel}
                     </span>
-                  {:else if item.seats && item.seats > 1}
-                    <span class="font-mono text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      {item.seats} seats
+                    <span>·</span>
+                    <span class="text-slate-500">
+                      {item.detected_language === 'BN_SCRIPT' ? 'বাংলা' : item.detected_language}
                     </span>
-                  {/if}
+                  </div>
+
+                  <!-- Tiered Urgency Glow Pill -->
+                  <div class="flex items-center gap-1 font-mono">
+                    {#if item.urgencyTier === 0}
+                      <span class="px-1.5 py-0.5 rounded font-bold bg-rose-600 text-white shadow-xs">
+                        {item.urgencyLabel}
+                      </span>
+                    {:else if item.urgencyTier === 1}
+                      <span class="px-1.5 py-0.5 rounded font-semibold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
+                        {item.urgencyLabel}
+                      </span>
+                    {:else if item.urgencyTier === 2}
+                      <span class="px-1.5 py-0.5 rounded font-bold bg-orange-500 text-white">
+                        {item.urgencyLabel}
+                      </span>
+                    {:else if item.urgencyTier === 3}
+                      <span class="px-1.5 py-0.5 rounded font-medium bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                        {item.urgencyLabel}
+                      </span>
+                    {:else if item.urgencyTier === 5}
+                      <span class="px-1.5 py-0.5 rounded font-medium bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+                        {item.urgencyLabel}
+                      </span>
+                    {:else}
+                      <span class="px-1.5 py-0.5 rounded text-slate-500 bg-warm-100 dark:bg-slate-800">
+                        {item.businessPriority} · {item.sla_formatted}
+                      </span>
+                    {/if}
+                  </div>
                 </div>
               </div>
+            {/each}
+          {/if}
+        </div>
+      </section>
+    {:else}
+      <!-- KANBAN BOARD VIEW -->
+      <section class="flex-1 min-w-0 border-r border-warm-200 dark:border-slate-800 bg-warm-100/50 dark:bg-slate-950 flex flex-col overflow-hidden">
+        <!-- Board Header with Switcher -->
+        <div class="h-10 border-b border-warm-200 dark:border-slate-800 px-4 flex items-center justify-between bg-white dark:bg-slate-900 text-xs shrink-0">
+          <div class="flex items-center gap-3">
+            <span class="font-bold text-slate-900 dark:text-white">Pipeline Stages</span>
+            <span class="text-slate-400 font-mono text-[11px]">({filteredEnquiries.length} total)</span>
+          </div>
 
-              <!-- Dynamic Peek Message Preview: expands on hover so operator can read full message before opening -->
-              <p class="text-xs text-slate-700 dark:text-slate-300 line-clamp-2 group-hover:line-clamp-none transition-all duration-200 my-2 font-bengali leading-relaxed">
-                "{item.message}"
-              </p>
+          <div class="flex items-center gap-1 bg-warm-100 dark:bg-slate-800 p-0.5 rounded-md text-[11px]">
+            <button 
+              onclick={() => viewMode = 'inbox'}
+              class="px-2 py-0.5 rounded font-medium transition text-slate-500 hover:text-slate-800">
+              Inbox
+            </button>
+            <button 
+              onclick={() => viewMode = 'board'}
+              class="px-2 py-0.5 rounded font-medium transition bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs">
+              Board
+            </button>
+          </div>
+        </div>
 
-              <!-- Dynamic Hover Metadata Peek: reveals phone, intent, and prompt on hover -->
-              <div class="hidden group-hover:flex items-center justify-between text-[11px] py-1 px-1.5 mb-1.5 rounded bg-warm-100/90 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border border-warm-200 dark:border-slate-700/60 transition-all">
-                <span class="font-mono font-medium">{item.normalized_phone || item.phone || 'No phone'}</span>
-                <span class="text-orange-600 dark:text-orange-400 font-semibold">{item.program_intent || 'General'}</span>
-                <span class="text-[10px] text-slate-400">Focus ↵</span>
-              </div>
-
-              <!-- Card Footer: Orthogonal Priority & SLA Pill -->
-              <div class="flex items-center justify-between text-[10px] pt-1 border-t border-warm-100 dark:border-slate-800/80">
+        <!-- 5 Stage Columns -->
+        <div class="flex-1 overflow-x-auto p-4 flex gap-4">
+          {#each salesStages as stage}
+            {@const stageItems = filteredEnquiries.filter(e => e.pipeline_stage === stage)}
+            {@const stageSum = stageItems.reduce((acc, e) => acc + (e.estimated_value_bdt || 0), 0)}
+            <div class="w-72 shrink-0 flex flex-col bg-white/70 dark:bg-slate-900/60 rounded-xl border border-warm-200 dark:border-slate-800 overflow-hidden shadow-xs">
+              <div class="p-3 border-b border-warm-200 dark:border-slate-800 bg-warm-50 dark:bg-slate-850 flex items-center justify-between">
                 <div class="flex items-center gap-2">
-                  <!-- Channel Icon / Name -->
-                  <span class="text-slate-500 font-medium">
-                    {item.channel}
-                  </span>
-                  <span>·</span>
-                  <span class="text-slate-500">
-                    {item.detected_language === 'BN_SCRIPT' ? 'বাংলা' : item.detected_language}
+                  <span class="font-bold text-xs text-slate-800 dark:text-slate-200">{stage}</span>
+                  <span class="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-warm-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-semibold">
+                    {stageItems.length}
                   </span>
                 </div>
+                {#if stageSum > 0}
+                  <span class="font-mono text-[11px] font-bold text-emerald-700 dark:text-emerald-400">
+                    ৳ {(stageSum / 1000).toFixed(0)}k
+                  </span>
+                {/if}
+              </div>
 
-                <!-- Tiered Urgency Glow Pill -->
-                <div class="flex items-center gap-1 font-mono">
-                  {#if item.urgencyTier === 0}
-                    <span class="px-1.5 py-0.5 rounded font-bold bg-rose-600 text-white shadow-xs">
-                      {item.urgencyLabel}
-                    </span>
-                  {:else if item.urgencyTier === 1}
-                    <span class="px-1.5 py-0.5 rounded font-semibold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
-                      {item.urgencyLabel}
-                    </span>
-                  {:else if item.urgencyTier === 2}
-                    <span class="px-1.5 py-0.5 rounded font-bold bg-orange-500 text-white">
-                      {item.urgencyLabel}
-                    </span>
-                  {:else if item.urgencyTier === 3}
-                    <span class="px-1.5 py-0.5 rounded font-medium bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-                      {item.urgencyLabel}
-                    </span>
-                  {:else if item.urgencyTier === 5}
-                    <span class="px-1.5 py-0.5 rounded font-medium bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
-                      SLA Met
-                    </span>
-                  {:else}
-                    <span class="px-1.5 py-0.5 rounded text-slate-500 bg-warm-100 dark:bg-slate-800">
-                      {item.businessPriority} · {item.sla_formatted}
-                    </span>
-                  {/if}
-                </div>
+              <!-- Stage Cards -->
+              <div class="p-2 overflow-y-auto space-y-2 flex-1">
+                {#if stageItems.length === 0}
+                  <div class="py-8 text-center text-slate-400 text-xs italic">
+                    No inquiries in {stage}
+                  </div>
+                {:else}
+                  {#each stageItems as item (item.id)}
+                    {@const isSelected = selectedEnquiry && selectedEnquiry.id === item.id}
+                    <div 
+                      role="button"
+                      tabindex="0"
+                      onclick={() => selectLead(item.id)}
+                      onkeydown={(e) => { if (e.key === 'Enter') selectLead(item.id); }}
+                      class={`group relative w-full text-left p-3 rounded-lg border transition-all duration-200 cursor-pointer hover:scale-[1.025] hover:-translate-y-1 hover:shadow-xl hover:z-30 origin-center ${item.railClass} ${item.urgencyGlowClass} ${
+                        isSelected 
+                          ? 'bg-orange-50/80 border-orange-400 dark:bg-orange-950/30 dark:border-orange-700 shadow-sm' 
+                          : 'bg-white hover:bg-warm-100/70 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-850'
+                      }`}>
+                      <div class="flex items-start justify-between gap-1">
+                        <span class="font-semibold text-xs text-slate-900 dark:text-white truncate">
+                          {item.sender_name}
+                        </span>
+                        {#if item.estimated_value_bdt}
+                          <span class="font-mono text-xs font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">
+                            ৳ {item.estimated_value_bdt.toLocaleString()}
+                          </span>
+                        {/if}
+                      </div>
+
+                      <p class="text-xs text-slate-700 dark:text-slate-300 line-clamp-2 group-hover:line-clamp-none transition-all duration-200 my-2 font-bengali leading-relaxed group-hover:text-[13px] group-hover:text-slate-950 dark:group-hover:text-white">
+                        "{item.message}"
+                      </p>
+
+                      <div class="hidden group-hover:flex items-center justify-between text-[10px] py-1 px-1.5 mb-1.5 rounded bg-warm-100/90 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-warm-200 dark:border-slate-700 font-mono">
+                        <span>{item.normalized_phone || item.phone || 'No phone'}</span>
+                        <span class="text-orange-600 dark:text-orange-400 font-semibold">↵ Open</span>
+                      </div>
+
+                      <div class="flex items-center justify-between text-[10px] pt-1 border-t border-warm-100 dark:border-slate-800 font-mono">
+                        <span class="text-slate-400">{item.channel}</span>
+                        <span class="font-semibold">{item.urgencyLabel}</span>
+                      </div>
+                    </div>
+                  {/each}
+                {/if}
               </div>
             </div>
           {/each}
-        {/if}
-      </div>
-    </section>
+        </div>
+      </section>
+    {/if}
 
     <!-- ------------------------------------------------------ -->
     <!-- PANE 3: PERSISTENT LEAD INSPECTOR & AI ACTION STUDIO   -->
     <!-- ------------------------------------------------------ -->
-    <main class="flex-1 bg-white dark:bg-slate-900 flex flex-col overflow-y-auto">
+    <main class={`${viewMode === 'board' ? 'w-[450px] shrink-0 border-l border-warm-200 dark:border-slate-800' : 'flex-1'} bg-white dark:bg-slate-900 flex flex-col overflow-y-auto`}>
       {#if !selectedEnquiry}
         <div class="m-auto text-center py-20 text-slate-400 text-sm">
           Select an inquiry from the inbox stream to inspect.
