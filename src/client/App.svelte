@@ -1075,18 +1075,21 @@
                     {/if}
                   </div>
 
-                  <!-- Stable Semantic Urgency Pill -->
-                  <div class="flex items-center gap-1 font-mono tabular-nums shrink-0">
-                    <span class={`px-1.5 py-0.5 rounded border text-[10px] font-medium flex items-center gap-1 ${item.badgeClass}`}>
-                      {#if item.urgency === 'critical'}
-                        <svg class="w-2.5 h-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-                      {:else if item.urgency === 'at-risk'}
-                        <svg class="w-2.5 h-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                      {:else if item.urgency === 'met'}
-                        <svg class="w-2.5 h-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                      {/if}
-                      <span>{item.urgencyLabel}</span>
-                    </span>
+                  <!-- Smart Semantic Urgency Label (One-Lined, No Nested Card) -->
+                  <div class="inline-flex items-center gap-1.5 font-mono tabular-nums shrink-0 whitespace-nowrap text-[10px]">
+                    {#if item.urgency === 'critical'}
+                      <span class="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0"></span>
+                      <span class="text-rose-600 dark:text-rose-400 font-semibold">{item.urgencyLabel}</span>
+                    {:else if item.urgency === 'at-risk'}
+                      <span class="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"></span>
+                      <span class="text-amber-600 dark:text-amber-400 font-semibold">{item.urgencyLabel}</span>
+                    {:else if item.urgency === 'met'}
+                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+                      <span class="text-emerald-600 dark:text-emerald-400 font-semibold">SLA Met</span>
+                    {:else}
+                      <span class="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600 shrink-0"></span>
+                      <span class="text-slate-400 dark:text-slate-500 font-normal">In SLA</span>
+                    {/if}
                   </div>
                 </div>
               </div>
@@ -1172,9 +1175,24 @@
                         "{item.message}"
                       </p>
 
-                      <div class="flex items-center justify-between text-[10px] pt-1 border-t border-warm-100 dark:border-slate-800 font-mono tabular-nums">
-                        <span class="text-slate-400">{item.channel}</span>
-                        <span class={`px-1.5 py-0.5 rounded border text-[10px] font-medium ${item.badgeClass}`}>{item.urgencyLabel}</span>
+                      <!-- Smart Semantic Urgency Label (One-Lined, No Nested Card) -->
+                      <div class="flex items-center justify-between gap-2 text-[10px] pt-1.5 border-t border-warm-100 dark:border-slate-800/80 font-mono tabular-nums">
+                        <span class="text-slate-400 whitespace-nowrap truncate">{item.channel}</span>
+                        <span class="inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 text-[10px]">
+                          {#if item.urgency === 'critical'}
+                            <span class="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0"></span>
+                            <span class="text-rose-600 dark:text-rose-400 font-semibold">{item.urgencyLabel}</span>
+                          {:else if item.urgency === 'at-risk'}
+                            <span class="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"></span>
+                            <span class="text-amber-600 dark:text-amber-400 font-semibold">{item.urgencyLabel}</span>
+                          {:else if item.urgency === 'met'}
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+                            <span class="text-emerald-600 dark:text-emerald-400 font-semibold">SLA Met</span>
+                          {:else}
+                            <span class="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600 shrink-0"></span>
+                            <span class="text-slate-400 dark:text-slate-500 font-normal">In SLA</span>
+                          {/if}
+                        </span>
                       </div>
                     </div>
                   {/each}
