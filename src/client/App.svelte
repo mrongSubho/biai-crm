@@ -1118,12 +1118,12 @@
           </div>
         </div>
 
-        <!-- 5 Stage Columns -->
-        <div class="flex-1 overflow-x-auto overscroll-contain p-4 flex gap-4 min-w-0 min-h-0">
+        <!-- 5 Stage Columns (BOARD DOES NOT SCROLL VERTICALLY, COLUMNS FIT VIEWPORT) -->
+        <div class="flex-1 overflow-x-auto overflow-y-hidden overscroll-contain p-3.5 flex gap-3 min-w-0 min-h-0">
           {#each salesStages as stage}
             {@const stageItems = filteredEnquiries.filter(e => e.pipeline_stage === stage)}
             {@const stageSum = stageItems.reduce((acc, e) => acc + (e.estimated_value_bdt || 0), 0)}
-            <div class="kanban-column w-72 shrink-0 flex flex-col bg-white/70 dark:bg-slate-900/60 rounded-xl border border-warm-200 dark:border-slate-800 overflow-hidden shadow-xs max-h-full min-h-0">
+            <div class="kanban-column w-72 shrink-0 flex flex-col bg-white/70 dark:bg-slate-900/60 rounded-xl border border-warm-200 dark:border-slate-800 overflow-hidden shadow-xs h-full min-h-0">
               <div class="p-3 border-b border-warm-200 dark:border-slate-800 bg-warm-50 dark:bg-slate-850 flex items-center justify-between shrink-0">
                 <div class="flex items-center gap-2">
                   <span class="font-bold text-xs text-slate-800 dark:text-slate-200">{stage}</span>
@@ -1138,7 +1138,7 @@
                 {/if}
               </div>
 
-              <!-- Stage Cards -->
+              <!-- Stage Cards (ONLY THIS INNER REGION SCROLLS) -->
               <div class="p-2 overflow-y-auto overscroll-contain space-y-2 flex-1 min-h-0">
                 {#if stageItems.length === 0}
                   <div class="py-8 text-center text-slate-400 text-xs italic">
@@ -1188,22 +1188,23 @@
 
     <!-- ------------------------------------------------------ -->
     <!-- PANE 3: PERSISTENT LEAD INSPECTOR & AI ACTION STUDIO   -->
+    <!-- (FIT IN ONE PAGE, ZERO SCROLL EXCEPT MESSAGE BODIES)  -->
     <!-- ------------------------------------------------------ -->
-    <main class={`detail-panel ${viewMode === 'board' ? 'w-full lg:w-[420px] xl:w-[450px] shrink-0 border-l border-warm-200 dark:border-slate-800' : 'flex-1'} bg-white dark:bg-slate-900 flex flex-col overflow-y-auto overscroll-contain min-h-0`}>
+    <main class={`detail-panel ${viewMode === 'board' ? 'w-full lg:w-[420px] xl:w-[450px] shrink-0 border-l border-warm-200 dark:border-slate-800' : 'flex-1'} bg-white dark:bg-slate-900 flex flex-col h-full min-h-0 overflow-hidden`}>
       {#if !selectedEnquiry}
         <div class="m-auto text-center py-20 text-slate-400 text-sm">
           Select an inquiry from the inbox stream to inspect.
         </div>
       {:else}
-        <!-- Inspector Top Header: Contact Identity & Actions -->
-        <div class="p-5 border-b border-warm-200 dark:border-slate-800 flex items-start justify-between gap-4 bg-warm-50/50 dark:bg-slate-900/60 shrink-0">
+        <!-- Inspector Top Header: Contact Identity & Actions (shrink-0) -->
+        <div class="p-3.5 border-b border-warm-200 dark:border-slate-800 flex items-start justify-between gap-3 bg-warm-50/50 dark:bg-slate-900/60 shrink-0">
           <div>
-            <div class="flex items-center gap-2.5">
-              <h2 class="text-lg font-bold text-slate-900 dark:text-white">
+            <div class="flex items-center gap-2">
+              <h2 class="text-base font-bold text-slate-900 dark:text-white truncate">
                 {selectedEnquiry.sender_name}
               </h2>
 
-              <span class={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
+              <span class={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider shrink-0 ${
                 selectedEnquiry.businessPriority === 'P0'
                   ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
                   : 'bg-warm-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
@@ -1214,13 +1215,13 @@
 
             <!-- Organization & Role -->
             {#if (selectedEnquiry as any).organization}
-              <p class="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+              <p class="text-[11px] text-slate-600 dark:text-slate-400 truncate mt-0.5">
                 {(selectedEnquiry as any).role ? `${(selectedEnquiry as any).role}, ` : ''}{(selectedEnquiry as any).organization}
               </p>
             {/if}
 
             <!-- Contact Metadata Row -->
-            <div class="flex flex-wrap items-center gap-4 text-xs text-slate-500 dark:text-slate-400 mt-2 font-mono tabular-nums">
+            <div class="flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-slate-400 mt-1.5 font-mono tabular-nums">
               <span class="flex items-center gap-1">
                 <span>Channel:</span>
                 <span class="font-semibold text-slate-800 dark:text-slate-200">{selectedEnquiry.channel}</span>
@@ -1233,6 +1234,7 @@
                     {selectedEnquiry.normalized_phone || selectedEnquiry.phone}
                   </span>
                   <button
+                    type="button"
                     onclick={() => copyToClipboard(selectedEnquiry.normalized_phone || selectedEnquiry.phone, 'Phone number')}
                     class="text-orange-600 hover:text-orange-700 ml-1 text-[11px]"
                     title="Copy normalized phone number">
@@ -1241,7 +1243,7 @@
                 </span>
               {:else}
                 <span class="text-amber-600 font-sans text-[11px]">
-                  ⚠️ Missing Phone Number (Ask in reply)
+                  ⚠️ Missing Phone (Ask in reply)
                 </span>
               {/if}
 
@@ -1262,7 +1264,7 @@
               id="stage-select"
               value={selectedEnquiry.pipeline_stage}
               onchange={(e) => transitionStage(selectedEnquiry.id, (e.target as HTMLSelectElement).value as PipelineStage)}
-              class="text-xs font-medium border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-lg px-2.5 py-1.5 focus:ring-1 focus:ring-orange-600 focus:outline-none">
+              class="text-xs font-medium border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-lg px-2 py-1 focus:ring-1 focus:ring-orange-600 focus:outline-none">
               {#each salesStages as st}
                 <option value={st}>{st}</option>
               {/each}
@@ -1270,31 +1272,31 @@
           </div>
         </div>
 
-        <!-- Inspector Content Body -->
-        <div class="p-6 space-y-6 flex-1">
+        <!-- Inspector Content Body (FIT IN ONE PAGE, ZERO SCROLL EXCEPT MESSAGE BODIES) -->
+        <div class="flex-1 flex flex-col min-h-0 p-3.5 gap-2.5 overflow-hidden text-xs">
 
-          <!-- SLA Policy & Pacing Card -->
-          <div class="bg-warm-50 dark:bg-slate-850 p-4 rounded-xl border border-warm-200 dark:border-slate-800 flex items-center justify-between text-xs">
+          <!-- SLA Policy & Pacing Card (shrink-0) -->
+          <div class="bg-warm-50 dark:bg-slate-850 p-2.5 rounded-lg border border-warm-200 dark:border-slate-800 flex items-center justify-between text-xs shrink-0">
             <div>
-              <span class="text-slate-500">48-Hour SLA Status:</span>
-              <div class="flex items-center gap-2 mt-1">
+              <span class="text-slate-500 text-[11px]">48-Hour SLA Status:</span>
+              <div class="flex items-center gap-2 mt-0.5">
                 {#if selectedEnquiry.first_response_at}
-                  <span class="font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                  <span class="font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5 text-xs">
                     <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    SLA Met (Response Logged {selectedEnquiry.first_response_at.slice(0, 16)})
+                    SLA Met (Logged {selectedEnquiry.first_response_at.slice(0, 16)})
                   </span>
                 {:else if selectedEnquiry.is_breached}
-                  <span class="font-semibold text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
+                  <span class="font-semibold text-rose-700 dark:text-rose-400 flex items-center gap-1.5 text-xs">
                     <span class="w-2 h-2 rounded-full bg-rose-500"></span>
                     SLA Breached ({selectedEnquiry.sla_hours_remaining}h overdue)
                   </span>
                 {:else if selectedEnquiry.is_at_risk}
-                  <span class="font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                  <span class="font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1.5 text-xs">
                     <span class="w-2 h-2 rounded-full bg-amber-500"></span>
                     At Risk ({selectedEnquiry.sla_formatted} remaining)
                   </span>
                 {:else}
-                  <span class="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <span class="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 text-xs">
                     <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
                     In SLA ({selectedEnquiry.sla_formatted} remaining)
                   </span>
@@ -1302,43 +1304,44 @@
               </div>
             </div>
 
-            <div class="text-right font-mono tabular-nums text-[11px] text-slate-400">
-              <div>Deadline: {selectedEnquiry.sla_due_at}</div>
-              <div>Timezone: Asia/Dhaka (10am–7pm)</div>
+            <div class="text-right font-mono tabular-nums text-[10px] text-slate-400 leading-tight">
+              <div>Due: {selectedEnquiry.sla_due_at}</div>
+              <div>Timezone: Asia/Dhaka</div>
             </div>
           </div>
 
-          <!-- Original Customer Inbound Message (Distinct Bengali Quote Box) -->
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+          <!-- Original Customer Inbound Message (shrink-0 with max-h and scrollable inner content) -->
+          <div class="shrink-0 flex flex-col">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                 Original Inbound Message
               </span>
-              <span class="text-[11px] text-slate-400">
+              <span class="text-[10px] text-slate-400">
                 Language: <strong class="text-slate-700 dark:text-slate-300">{selectedEnquiry.detected_language}</strong>
-                ({Math.round((selectedEnquiry.language_confidence || 1) * 100)}% confidence)
+                ({Math.round((selectedEnquiry.language_confidence || 1) * 100)}%)
               </span>
             </div>
 
-            <div class="bengali-quote bg-warm-50 dark:bg-slate-950 p-4 rounded-xl border-l-4 border-orange-500 border-t border-r border-b border-warm-200 dark:border-slate-800 text-sm text-slate-800 dark:text-slate-100">
+            <div class="bengali-quote bg-warm-50 dark:bg-slate-950 p-2.5 rounded-lg border-l-4 border-orange-500 border-t border-r border-b border-warm-200 dark:border-slate-800 text-xs text-slate-800 dark:text-slate-100 max-h-24 overflow-y-auto overscroll-contain font-bengali leading-relaxed">
               "{selectedEnquiry.message}"
             </div>
           </div>
 
-          <!-- AI Dialect-Matched Reply Composer -->
-          <div class="space-y-3">
-            <div class="flex items-center justify-between">
+          <!-- AI Dialect-Matched Reply Composer (Takes remaining height, textarea scrolls if needed) -->
+          <div class="flex-1 flex flex-col min-h-0 overflow-hidden gap-1.5">
+            <div class="flex items-center justify-between shrink-0">
               <div class="flex items-center gap-2">
-                <span class="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                <span class="text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                   Dialect-Matched Suggested Reply
                 </span>
-                <span class="text-[10px] font-mono bg-orange-100 text-orange-800 dark:bg-orange-950/60 dark:text-orange-300 px-1.5 py-0.5 rounded">
+                <span class="text-[9px] font-mono bg-orange-100 text-orange-800 dark:bg-orange-950/60 dark:text-orange-300 px-1.5 py-0.2 rounded">
                   Tone: Respectful Professional
                 </span>
               </div>
 
               {#if selectedEnquiry.suggested_reply_alt}
                 <button
+                  type="button"
                   onclick={() => editableReply = selectedEnquiry.suggested_reply_alt}
                   class="text-[11px] text-orange-600 hover:underline">
                   Switch to Alt Dialect
@@ -1348,49 +1351,51 @@
 
             <textarea
               bind:value={editableReply}
-              rows="4"
-              class="w-full text-sm p-3.5 rounded-xl border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-850 text-slate-900 dark:text-slate-100 font-bengali leading-relaxed focus:outline-none focus:ring-1 focus:ring-orange-600"
+              class="w-full flex-1 min-h-0 resize-none overflow-y-auto overscroll-contain text-xs p-2.5 rounded-lg border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-850 text-slate-900 dark:text-slate-100 font-bengali leading-relaxed focus:outline-none focus:ring-1 focus:ring-orange-600"
               placeholder="Draft your reply..."></textarea>
 
-            <!-- Reply Actions -->
-            <div class="flex items-center justify-between pt-1">
+            <!-- Reply Actions (Pinned at bottom, shrink-0) -->
+            <div class="flex items-center justify-between shrink-0 pt-1">
               <div class="flex items-center gap-2">
                 {#if selectedEnquiry.businessPriority === 'P0'}
                   <button
+                    type="button"
                     onclick={() => transitionTicketStatus(selectedEnquiry.id, 'ESCALATED', 'P0 PR risk escalated to supervisor')}
-                    class="text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-lg flex items-center gap-1.5 shadow-xs transition">
-                    🚨 Escalate to Supervisor
+                    class="text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition">
+                    🚨 Escalate
                   </button>
                 {/if}
 
                 <button
+                  type="button"
                   onclick={() => copyToClipboard(editableReply, 'Suggested reply')}
-                  class="text-xs font-medium bg-warm-100 hover:bg-warm-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 px-3 py-2 rounded-lg transition">
+                  class="text-xs font-medium bg-warm-100 hover:bg-warm-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 px-3 py-1.5 rounded-lg transition">
                   📋 Copy Reply
                 </button>
               </div>
 
               <button
+                type="button"
                 onclick={() => approveReply(selectedEnquiry.id)}
                 disabled={isSendingReply}
-                class="text-xs font-semibold bg-orange-600 hover:bg-orange-500 text-white px-5 py-2 rounded-full flex items-center gap-2 shadow-sm active:scale-[0.98] transition disabled:opacity-50">
+                class="text-xs font-semibold bg-orange-600 hover:bg-orange-500 text-white px-4 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm active:scale-[0.98] transition disabled:opacity-50">
                 {#if isSendingReply}
                   <div class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                   <span>Approving...</span>
                 {:else}
-                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                   <span>Approve & Send Outbound</span>
                 {/if}
               </button>
             </div>
           </div>
 
-          <!-- Audit Log Trail -->
-          <div class="pt-4 border-t border-warm-200 dark:border-slate-800">
-            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">
+          <!-- Audit Log Trail (shrink-0, compact at bottom) -->
+          <div class="shrink-0 pt-2 border-t border-warm-200 dark:border-slate-800 text-[10px]">
+            <span class="font-semibold text-slate-400 uppercase tracking-wider block mb-1">
               Record Audit Lineage
             </span>
-            <div class="text-[11px] font-mono tabular-nums text-slate-500 space-y-1">
+            <div class="font-mono tabular-nums text-slate-500 space-y-0.5 leading-tight">
               <div>• [{selectedEnquiry.received_at}] Ingestion via {selectedEnquiry.channel} webhook (ID: {selectedEnquiry.id})</div>
               <div>• [{selectedEnquiry.received_at}] Triaged to {selectedEnquiry.triage_category} (Priority: {selectedEnquiry.businessPriority})</div>
               {#if selectedEnquiry.first_response_at}
