@@ -10,9 +10,9 @@ VALUES ('ws_biai_main', 'BIAI Institute', 'Asia/Dhaka');
 -- 2. Staff Users (Farhan Ahmed - Admin, Tanvir Islam - Sales Rep, Nasreen Khan - Supervisor)
 INSERT OR IGNORE INTO users (id, workspace_id, email, full_name, role, password_hash, is_active)
 VALUES 
-  ('usr_admin_1', 'ws_biai_main', 'admin@biai.com.bd', 'Farhan Ahmed', 'ADMIN', 'argon2id_mock_hash_admin', 1),
-  ('usr_rep_1', 'ws_biai_main', 'tanvir@biai.com.bd', 'Tanvir Islam', 'SALES_REP', 'argon2id_mock_hash_rep', 1),
-  ('usr_sup_1', 'ws_biai_main', 'supervisor@biai.com.bd', 'Nasreen Khan', 'SUPERVISOR', 'argon2id_mock_hash_sup', 1);
+  ('usr_admin_1', 'ws_biai_main', 'admin@biai.com.bd', 'Farhan Ahmed', 'ADMIN', 'disabled_pending_bootstrap', 0),
+  ('usr_rep_1', 'ws_biai_main', 'tanvir@biai.com.bd', 'Tanvir Islam', 'SALES_REP', 'disabled_pending_bootstrap', 0),
+  ('usr_sup_1', 'ws_biai_main', 'supervisor@biai.com.bd', 'Nasreen Khan', 'SUPERVISOR', 'disabled_pending_bootstrap', 0);
 
 -- 2.1 Staff Active Sessions (Pre-seeded hashed sessions)
 INSERT OR IGNORE INTO sessions (id, user_id, token_hash, expires_at)

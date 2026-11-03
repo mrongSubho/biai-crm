@@ -1,7 +1,5 @@
 /**
- * Meta WhatsApp Cloud API Adapter for BIAI CRM
- * Dispatches outbound template or free-form WhatsApp messages with full error handling
- * and mock fallbacks for local development / testing.
+ * Meta WhatsApp Cloud API Adapter for BIAI CRM.
  */
 
 export interface WhatsAppSendOptions {
@@ -9,6 +7,8 @@ export interface WhatsAppSendOptions {
   messageText: string;
   token?: string;
   phoneNumberId?: string;
+  idempotencyKey?: string;
+  allowMock?: boolean;
 }
 
 export interface WhatsAppSendResult {
@@ -21,32 +21,32 @@ export interface WhatsAppSendResult {
 }
 
 export async function sendWhatsAppMessage(options: WhatsAppSendOptions): Promise<WhatsAppSendResult> {
-  const { recipientPhone, messageText, token, phoneNumberId } = options;
+  const { recipientPhone, messageText, token, phoneNumberId, idempotencyKey, allowMock = false } = options;
   const timestamp = new Date().toISOString();
 
-  // If real Meta credentials are provided, dispatch through the official Graph API
   if (token && phoneNumberId) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
       const cleanPhone = recipientPhone.replace(/[^0-9]/g, '');
       const response = await fetch(`https://graph.facebook.com/v20.0/${phoneNumberId}/messages`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
         },
         body: JSON.stringify({
           messaging_product: 'whatsapp',
           recipient_type: 'individual',
           to: cleanPhone,
           type: 'text',
-          text: {
-            preview_url: false,
-            body: messageText
-          }
-        })
+          text: { preview_url: false, body: messageText }
+        }),
+        signal: controller.signal
       });
 
-      const data: any = await response.json();
+      const data: any = await response.json().catch(() => ({}));
       if (!response.ok) {
         return {
           success: false,
@@ -58,10 +58,9 @@ export async function sendWhatsAppMessage(options: WhatsAppSendOptions): Promise
         };
       }
 
-      const messageId = data?.messages?.[0]?.id || `wamid.HBgM${Date.now()}`;
       return {
         success: true,
-        messageId,
+        messageId: data?.messages?.[0]?.id || '',
         provider: 'META_CLOUD_API',
         status: 'SENT',
         timestamp
@@ -72,19 +71,30 @@ export async function sendWhatsAppMessage(options: WhatsAppSendOptions): Promise
         messageId: '',
         provider: 'META_CLOUD_API',
         status: 'FAILED',
-        error: err?.message || 'Network error contacting Meta API',
+        error: err?.name === 'AbortError' ? 'PROVIDER_TIMEOUT' : (err?.message || 'Network error contacting Meta API'),
         timestamp
       };
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
-  // Fallback Mock Adapter for Testing and Evaluator Demonstrations
-  const mockMessageId = `wamid.HBgM${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+  if (allowMock) {
+    return {
+      success: true,
+      messageId: `mock_whatsapp_${crypto.randomUUID()}`,
+      provider: 'MOCK_ADAPTER',
+      status: 'SENT',
+      timestamp
+    };
+  }
+
   return {
-    success: true,
-    messageId: mockMessageId,
-    provider: 'MOCK_ADAPTER',
-    status: 'SENT',
+    success: false,
+    messageId: '',
+    provider: 'META_CLOUD_API',
+    status: 'FAILED',
+    error: 'MISSING_CREDENTIALS: Meta WhatsApp token or Phone Number ID not configured',
     timestamp
   };
 }

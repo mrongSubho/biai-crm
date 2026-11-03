@@ -1,9 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { parseIncomingMessage } from '../src/lib/engine/parser';
 import { normalizeBangladeshPhone } from '../src/lib/engine/phone';
 import { detectDialect } from '../src/lib/engine/dialect';
 import { analyzeMessageTriage } from '../src/lib/engine/triage';
 import { calculateSlaStatus } from '../src/lib/engine/sla';
+import { parseWithAiOrFallback } from '../src/server/ai/parser';
 
 describe('Bangladesh E.164 Phone Normalizer', () => {
   it('normalizes standard 11-digit local format', () => {
@@ -138,6 +139,53 @@ describe('Full Ingestion & Extraction Engine', () => {
       senderRaw: 'Rafi Ahmed',
       phoneRaw: '01711000001',
       channel: 'WhatsApp'
+    });
+
+    describe('AI provider hardening', () => {
+      it('rejects malformed provider JSON and records a deterministic fallback reason', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+          candidates: [{ content: { parts: [{ text: '{"urgency":"NOT_VALID"}' }] } }]
+        }), { status: 200 }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        const result = await parseWithAiOrFallback({
+          content: 'Need a bootcamp quote',
+          senderRaw: 'Test User',
+          phoneRaw: '01711000001',
+          geminiApiKey: 'test-key'
+        });
+
+        expect(result.provider).toBe('deterministic');
+        expect(result.fallbackReason).toBe('ZodError');
+        vi.unstubAllGlobals();
+      });
+
+      it('accepts a schema-valid Gemini response and preserves provider provenance', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+          candidates: [{ content: { parts: [{ text: JSON.stringify({
+            detected_language: 'EN',
+            triage_category: 'SALES_LEAD',
+            program_intent: 'Bootcamp',
+            urgency: 'HIGH',
+            estimated_seats: 4,
+            estimated_value_bdt: 14000,
+            confidence: 0.88
+          }) }] } }]
+        }), { status: 200 }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        const result = await parseWithAiOrFallback({
+          content: 'Need a bootcamp quote',
+          senderRaw: 'Test User',
+          phoneRaw: '01711000001',
+          geminiApiKey: 'test-key'
+        });
+
+        expect(result.provider).toBe('gemini-2.5-flash');
+        expect(result.confidence).toBe(0.88);
+        expect(result.extraction.estimated_seats).toBe(4);
+        vi.unstubAllGlobals();
+      });
     });
 
     expect(res.extracted_name).toBe('Rafi Ahmed');

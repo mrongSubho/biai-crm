@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { sampleEnquiriesFixture } from '../server/fixtures';
   import { parseIncomingMessage } from '../lib/engine/parser';
   import { calculateSlaStatus } from '../lib/engine/sla';
   import { soundFx } from '../lib/audio/sound_fx.ts';
@@ -20,8 +19,27 @@
   let ingestChannel = $state<Channel>('WhatsApp');
   let ingestMessage = $state('Assalamualaikum, amader corporate team er jonno AI bootcamp quote lagbe. 25 jon engineer attend korbe.');
 
+  // --- AUTHENTICATION & OPERATOR STATE ---
+  let currentUser = $state<{
+    id: string;
+    email: string;
+    full_name: string;
+    department?: string;
+    role: string;
+    security_tier: string;
+    scopes: string[];
+  } | null>(null);
+  let csrfToken = $state('');
+  let authChecking = $state(true);
+  let loginEmail = $state('tanvir@biai.com.bd');
+  let loginPassword = $state('RepPassword2026!');
+  let loginMfaCode = $state('');
+  let loginRequiresMfa = $state(false);
+  let loginError = $state<string | null>(null);
+  let loginLoading = $state(false);
+
   // --- DATA & TRIAGE STATE ---
-  let enquiries = $state([...sampleEnquiriesFixture]);
+  let enquiries = $state<any[]>([]);
   let selectedId = $state<number>(1);
   let activeQueue = $state<'sales' | 'billing' | 'escalation' | 'careers' | 'spam' | 'all'>('sales');
   let activeFilter = $state<'all' | 'p0' | 'at_risk' | 'corporate' | 'bangla'>('all');
@@ -33,6 +51,96 @@
 
   // Inspector Action State
   let editableReply = $state('');
+
+  async function checkAuth() {
+    authChecking = true;
+    try {
+      const res = await fetch('/api/auth/me', { credentials: 'include' });
+      if (res.ok) {
+        currentUser = await res.json();
+        await loadEnquiries();
+      } else {
+        currentUser = null;
+        enquiries = [];
+      }
+    } catch {
+      currentUser = null;
+    } finally {
+      authChecking = false;
+    }
+  }
+
+  async function loadEnquiries() {
+    try {
+      const r = await fetch('/api/v1/enquiries?queue=all', { credentials: 'include' });
+      if (r.ok) {
+        const res = await r.json();
+        if (res?.data && Array.isArray(res.data)) {
+          enquiries = res.data;
+          if (enquiries.length > 0 && !selectedId) {
+            selectedId = enquiries[0].id;
+          }
+        }
+      }
+    } catch (e) {
+      console.log('Failed to fetch enquiries:', e);
+    }
+  }
+
+  async function handleLogin() {
+    loginLoading = true;
+    loginError = null;
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          email: loginEmail,
+          password: loginPassword,
+          mfaCode: loginRequiresMfa ? loginMfaCode : undefined
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        loginError = data.error || 'Authentication failed';
+        loginLoading = false;
+        return;
+      }
+      if (data.requiresMfa) {
+        loginRequiresMfa = true;
+        loginLoading = false;
+        return;
+      }
+      csrfToken = data.csrfToken || '';
+      currentUser = data.user;
+      loginRequiresMfa = false;
+      await loadEnquiries();
+    } catch (err: any) {
+      loginError = err.message || 'Network error during login';
+    } finally {
+      loginLoading = false;
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken },
+        credentials: 'include'
+      });
+    } catch {}
+    currentUser = null;
+    csrfToken = '';
+    enquiries = [];
+  }
+
+  function quickLogin(email: string, pass: string) {
+    loginEmail = email;
+    loginPassword = pass;
+    handleLogin();
+  }
 
   // --- KEYBOARD & THEME INITIALIZATION ---
   onMount(() => {
@@ -48,15 +156,8 @@
       document.documentElement.classList.remove('dark');
     }
 
-    // 2. Fetch authoritative records from D1 backend with graceful fallback
-    fetch('/api/v1/enquiries?queue=all')
-      .then(r => r.ok ? r.json() : null)
-      .then(res => {
-        if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
-          enquiries = res.data;
-        }
-      })
-      .catch(e => console.log('Standalone mode: using seeded enquiry fixture', e));
+    // 2. Authoritative Auth Check
+    checkAuth();
 
     const handleKeydown = (e: KeyboardEvent) => {
       // Cmd+K -> Focus Search
@@ -132,12 +233,12 @@
 
       // SLA State
       const isMet = !!rec.first_response_at;
-      const slaState: 'HEALTHY' | 'AT_RISK' | 'BREACHED' | 'MET' = isMet 
-        ? 'MET' 
-        : sla.isBreached 
-          ? 'BREACHED' 
-          : sla.isAtRisk 
-            ? 'AT_RISK' 
+      const slaState: 'HEALTHY' | 'AT_RISK' | 'BREACHED' | 'MET' = isMet
+        ? 'MET'
+        : sla.isBreached
+          ? 'BREACHED'
+          : sla.isAtRisk
+            ? 'AT_RISK'
             : 'HEALTHY';
 
       // 6-Tier Urgency Matrix & Priority Glow
@@ -155,8 +256,8 @@
         const overdueHours = Math.abs(sla.hoursRemaining);
         if (overdueHours >= 2 || businessPriority === 'P0') {
           urgencyTier = 0; // > 2h overdue or P0 PR threat
-          urgencyLabel = businessPriority === 'P0' 
-            ? '🚨 P0 · CRITICAL' 
+          urgencyLabel = businessPriority === 'P0'
+            ? '🚨 P0 · CRITICAL'
             : `🚨 OVERDUE ${Math.round(overdueHours)}h`;
           urgencyGlowClass = 'border-red-600 shadow-[0_0_18px_rgba(220,38,38,0.45)] ring-2 ring-red-500/60 animate-pulse bg-red-50/50 dark:bg-red-950/30';
           urgencyRailClass = 'rail-p0';
@@ -234,9 +335,9 @@
 
   // Selected Lead (Guaranteed Selection)
   let selectedEnquiry = $derived(
-    filteredEnquiries.find(e => e.id === selectedId) || 
-    evaluatedEnquiries.find(e => e.id === selectedId) || 
-    filteredEnquiries[0] || 
+    filteredEnquiries.find(e => e.id === selectedId) ||
+    evaluatedEnquiries.find(e => e.id === selectedId) ||
+    filteredEnquiries[0] ||
     evaluatedEnquiries[0]
   );
 
@@ -290,7 +391,8 @@
     // Persist to D1 in background
     fetch(`/api/v1/enquiries/${id}/reply`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      credentials: 'include',
       body: JSON.stringify({ replyText: textToSend, channel: selectedEnquiry.channel })
     }).catch(e => console.log('Local action cached', e));
   }
@@ -308,7 +410,8 @@
     // Persist to D1 in background
     fetch(`/api/v1/enquiries/${id}/stage`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      credentials: 'include',
       body: JSON.stringify({ newStage: stage })
     }).catch(e => console.log('Local action cached', e));
   }
@@ -326,7 +429,8 @@
     // Persist to D1 in background
     fetch(`/api/v1/enquiries/${id}/status`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      credentials: 'include',
       body: JSON.stringify({ newStatus: status, notes })
     }).catch(e => console.log('Local action cached', e));
   }
@@ -441,7 +545,7 @@
   <!-- 1. TOP COMMAND BAR (AUTHENTIC BIAI ECOSYSTEM HEADER)      -->
   <!-- ======================================================== -->
   <header class="h-14 border-b border-warm-200 dark:border-slate-800 bg-[#FAF9F6] dark:bg-[#080C14] px-4 flex items-center justify-between gap-4 shrink-0 z-30 transition-colors">
-    
+
     <!-- Left: Authentic BIAI Brand Identity & Ecosystem Navigation -->
     <div class="flex items-center gap-5">
       <!-- Official BIAI Circular Woven Emblem & Spaced Wordmark -->
@@ -459,27 +563,27 @@
         </span>
 
         <!-- Switch to Task 2 Corporate Pipeline -->
-        <a 
-          href="/task2" 
+        <a
+          href="/task2"
           title="Switch to Corporate Pipeline workspace"
           class="py-4 px-3 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition">
           Corporate Pipeline
         </a>
 
         <!-- External BIAI Portals directly from biai.com.bd -->
-        <a 
-          href="https://biai.com.bd/courses" 
-          target="_blank" 
-          rel="noopener noreferrer" 
+        <a
+          href="https://biai.com.bd/courses"
+          target="_blank"
+          rel="noopener noreferrer"
           class="py-4 px-3 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition flex items-center gap-1">
           <span>Courses</span>
           <svg class="w-2.5 h-2.5 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
         </a>
 
-        <a 
-          href="https://biai.com.bd" 
-          target="_blank" 
-          rel="noopener noreferrer" 
+        <a
+          href="https://biai.com.bd"
+          target="_blank"
+          rel="noopener noreferrer"
           class="py-4 px-3 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition flex items-center gap-1">
           <span>For Business</span>
           <svg class="w-2.5 h-2.5 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
@@ -494,15 +598,15 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
         </svg>
       </div>
-      <input 
+      <input
         id="global-search"
-        type="text" 
+        type="text"
         bind:value={searchQuery}
         placeholder="Search sender, company, phone (+880), keyword...  ⌘K"
         class="w-full text-xs pl-9 pr-14 py-1.5 rounded-lg border border-warm-200 dark:border-slate-800 bg-white/70 dark:bg-slate-950/70 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-orange-600 transition"
       />
       {#if searchQuery}
-        <button 
+        <button
           onclick={() => searchQuery = ''}
           class="absolute inset-y-0 right-2 my-auto h-5 px-1.5 text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 flex items-center">
           ✕ Clear
@@ -515,7 +619,7 @@
     <!-- Right: Utility Controls & Primary CTA -->
     <div class="flex items-center gap-2">
       <!-- Sound FX Toggle Button -->
-      <button 
+      <button
         onclick={toggleAudio}
         aria-label="Toggle audio effects"
         title={audioEnabled ? 'Audio FX Enabled (Click to Mute)' : 'Audio FX Muted (Click to Unmute)'}
@@ -528,7 +632,7 @@
       </button>
 
       <!-- Evaluator Mode Sandbox Toggle -->
-      <button 
+      <button
         onclick={() => evaluatorMode = !evaluatorMode}
         class={`text-xs font-medium px-2.5 py-1.5 rounded-lg border transition flex items-center gap-1.5 ${evaluatorMode ? 'bg-amber-100 border-amber-300 text-amber-900 dark:bg-amber-950/60 dark:border-amber-600 dark:text-amber-300' : 'bg-white text-slate-600 border-warm-200 hover:bg-warm-50 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-800 dark:hover:bg-slate-800'}`}
         title="Toggle Time Machine evaluation fixture">
@@ -537,7 +641,7 @@
       </button>
 
       <!-- CSV Export -->
-      <button 
+      <button
         onclick={exportCsv}
         aria-label="Export CSV"
         title="Export active queue to CSV"
@@ -546,7 +650,7 @@
       </button>
 
       <!-- Theme Switcher -->
-      <button 
+      <button
         onclick={toggleTheme}
         aria-label="Toggle theme"
         title={theme === 'dark' ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
@@ -558,8 +662,24 @@
         {/if}
       </button>
 
+      <!-- Authenticated Operator Badge & Logout -->
+      {#if currentUser}
+        <div class="hidden sm:flex items-center gap-2 pl-2 border-l border-warm-200 dark:border-slate-800">
+          <div class="text-right">
+            <div class="text-xs font-semibold text-slate-800 dark:text-slate-200 leading-tight">{currentUser.full_name}</div>
+            <div class="text-[10px] font-mono text-orange-600 dark:text-orange-400 leading-tight">{currentUser.security_tier} · {currentUser.role}</div>
+          </div>
+          <button
+            onclick={handleLogout}
+            class="text-xs px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 font-medium transition"
+            title="Sign out of BIAI CRM Control Plane">
+            Sign Out
+          </button>
+        </div>
+      {/if}
+
       <!-- Primary Action Button (Authentic BIAI Orange Pill matching Start Building) -->
-      <button 
+      <button
         onclick={() => showParserModal = true}
         class="text-xs font-semibold bg-[#C2410C] hover:bg-[#EA580C] text-white px-4 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm hover:shadow-orange-600/30 active:scale-[0.97] transition">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
@@ -567,6 +687,111 @@
       </button>
     </div>
   </header>
+
+  {#if authChecking}
+    <div class="flex-1 flex items-center justify-center bg-warm-50 dark:bg-slate-950">
+      <div class="flex flex-col items-center gap-3">
+        <div class="w-8 h-8 border-2 border-orange-600 border-t-transparent rounded-full animate-spin"></div>
+        <div class="text-xs text-slate-500 font-mono">Verifying BIAI Operator Session...</div>
+      </div>
+    </div>
+  {:else if !currentUser}
+    <!-- LOGIN OVERLAY -->
+    <div class="flex-1 flex items-center justify-center p-4 bg-[#FAF9F6] dark:bg-[#080C14]">
+      <div class="w-full max-w-md p-8 rounded-2xl border border-warm-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl">
+        <!-- Brand Header -->
+        <div class="flex items-center gap-3 mb-6">
+          <img src="/biai-logo.png" alt="BIAI" class="w-10 h-10 rounded-full shrink-0" />
+          <div>
+            <h1 class="text-lg font-bold text-slate-900 dark:text-white tracking-wide">BIAI CRM Control Plane</h1>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Restricted Operations & Inbound Triage Gateway</p>
+          </div>
+        </div>
+
+        {#if loginError}
+          <div class="mb-4 p-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-300 text-xs">
+            {loginError}
+          </div>
+        {/if}
+
+        <form onsubmit={(e) => { e.preventDefault(); handleLogin(); }} class="space-y-4">
+          <div>
+            <label for="login-email" class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Work Email</label>
+            <input
+              id="login-email"
+              type="email"
+              bind:value={loginEmail}
+              required
+              class="w-full text-xs px-3 py-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-orange-600 outline-none"
+              placeholder="operator@biai.com.bd"
+            />
+          </div>
+
+          <div>
+            <label for="login-password" class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Password</label>
+            <input
+              id="login-password"
+              type="password"
+              bind:value={loginPassword}
+              required
+              class="w-full text-xs px-3 py-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-orange-600 outline-none"
+            />
+          </div>
+
+          {#if loginRequiresMfa}
+            <div class="p-3 rounded-lg bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-900">
+              <label for="login-mfa" class="block text-xs font-semibold text-orange-900 dark:text-orange-200 mb-1">MFA Security Code</label>
+              <input
+                id="login-mfa"
+                type="text"
+                bind:value={loginMfaCode}
+                required
+                maxlength="6"
+                class="w-full text-center font-mono text-base tracking-widest px-3 py-1.5 rounded-lg border border-orange-300 dark:border-orange-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-1 focus:ring-orange-600 outline-none"
+                placeholder="000000"
+              />
+              <p class="text-[10px] text-orange-700 dark:text-orange-300/80 mt-1">Enter 6-digit code from your authenticator app</p>
+            </div>
+          {/if}
+
+          <button
+            type="submit"
+            disabled={loginLoading}
+            class="w-full py-2 px-4 rounded-lg bg-[#C2410C] hover:bg-[#EA580C] text-white font-semibold text-xs shadow transition disabled:opacity-50">
+            {loginLoading ? 'Authenticating...' : (loginRequiresMfa ? 'Verify MFA & Enter' : 'Sign In')}
+          </button>
+        </form>
+
+        <!-- Quick Operator Access for Evaluation/Demo -->
+        <div class="mt-6 pt-5 border-t border-warm-200 dark:border-slate-800">
+          <div class="text-[11px] font-semibold text-slate-500 mb-2">Demo / Evaluation Profiles:</div>
+          <div class="grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              onclick={() => quickLogin('admin@biai.com.bd', 'AdminPassword2026!')}
+              class="text-[10px] p-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-warm-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-orange-500 transition text-center">
+              <div class="font-bold">Tier 0</div>
+              <div class="text-[9px] opacity-75">Platform Owner</div>
+            </button>
+            <button
+              type="button"
+              onclick={() => quickLogin('supervisor@biai.com.bd', 'SupervisorPassword2026!')}
+              class="text-[10px] p-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-warm-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-orange-500 transition text-center">
+              <div class="font-bold">Tier 2</div>
+              <div class="text-[9px] opacity-75">Team Lead</div>
+            </button>
+            <button
+              type="button"
+              onclick={() => quickLogin('tanvir@biai.com.bd', 'RepPassword2026!')}
+              class="text-[10px] p-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-warm-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-orange-500 transition text-center">
+              <div class="font-bold">Tier 3</div>
+              <div class="text-[9px] opacity-75">Specialist</div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {:else}
 
   <!-- ======================================================== -->
   <!-- 2. SANDBOXED EVALUATOR BANNER (ONLY WHEN ACTIVE)          -->
@@ -586,37 +811,37 @@
 
       <div class="flex items-center gap-1.5">
         <span class="text-slate-500 text-[11px] mr-1">Scrub Clock:</span>
-        <button 
+        <button
           onclick={() => scrubSimTime('2026-10-27T12:00:00')}
           class="px-2 py-0.5 rounded text-[11px] font-medium bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100">
           -24h
         </button>
-        <button 
+        <button
           onclick={() => scrubSimTime('2026-10-28T00:00:00')}
           class="px-2 py-0.5 rounded text-[11px] font-medium bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100">
           -12h
         </button>
-        <button 
+        <button
           onclick={() => scrubSimTime('2026-10-28T12:00:00')}
           class="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-600 text-white shadow-xs">
           Baseline (Oct 28)
         </button>
-        <button 
+        <button
           onclick={() => scrubSimTime('2026-10-29T00:00:00')}
           class="px-2 py-0.5 rounded text-[11px] font-medium bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100">
           +12h
         </button>
-        <button 
+        <button
           onclick={() => scrubSimTime('2026-10-29T12:00:00')}
           class="px-2 py-0.5 rounded text-[11px] font-medium bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100">
           +24h
         </button>
-        <button 
+        <button
           onclick={() => scrubSimTime('2026-10-30T12:00:00')}
           class="px-2 py-0.5 rounded text-[11px] font-medium bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100">
           +48h
         </button>
-        <button 
+        <button
           onclick={() => { evaluatorMode = false; simTime = '2026-10-28T12:00:00'; }}
           class="ml-2 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 underline text-[11px]">
           ✕ Exit
@@ -688,7 +913,7 @@
             Triage Queues
           </div>
           <nav class="space-y-0.5 text-xs">
-            <button 
+            <button
               onclick={() => activeQueue = 'sales'}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeQueue === 'sales' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
@@ -700,7 +925,7 @@
               </span>
             </button>
 
-            <button 
+            <button
               onclick={() => activeQueue = 'billing'}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeQueue === 'billing' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
@@ -712,7 +937,7 @@
               </span>
             </button>
 
-            <button 
+            <button
               onclick={() => activeQueue = 'escalation'}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeQueue === 'escalation' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
@@ -724,7 +949,7 @@
               </span>
             </button>
 
-            <button 
+            <button
               onclick={() => activeQueue = 'careers'}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeQueue === 'careers' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
@@ -736,7 +961,7 @@
               </span>
             </button>
 
-            <button 
+            <button
               onclick={() => activeQueue = 'spam'}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeQueue === 'spam' ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
@@ -748,7 +973,7 @@
               </span>
             </button>
 
-            <button 
+            <button
               onclick={() => activeQueue = 'all'}
               class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${activeQueue === 'all' ? 'bg-slate-900 text-white dark:bg-slate-800 dark:text-white font-semibold' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800'}`}>
               <div class="flex items-center gap-2">
@@ -768,27 +993,27 @@
             Quick Filters
           </div>
           <div class="space-y-0.5 text-xs">
-            <button 
+            <button
               onclick={() => activeFilter = 'all'}
               class={`w-full text-left px-2.5 py-1.5 rounded-lg transition ${activeFilter === 'all' ? 'text-orange-700 dark:text-orange-300 font-semibold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
               All Inquiries
             </button>
-            <button 
+            <button
               onclick={() => activeFilter = 'p0'}
               class={`w-full text-left px-2.5 py-1.5 rounded-lg transition ${activeFilter === 'p0' ? 'text-rose-700 dark:text-rose-300 font-semibold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
               🚨 P0 PR Threats
             </button>
-            <button 
+            <button
               onclick={() => activeFilter = 'at_risk'}
               class={`w-full text-left px-2.5 py-1.5 rounded-lg transition ${activeFilter === 'at_risk' ? 'text-amber-700 dark:text-amber-300 font-semibold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
               ⚠️ At Risk (&lt;12h)
             </button>
-            <button 
+            <button
               onclick={() => activeFilter = 'corporate'}
               class={`w-full text-left px-2.5 py-1.5 rounded-lg transition ${activeFilter === 'corporate' ? 'text-slate-900 dark:text-white font-semibold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
               🏢 Corporate Whales
             </button>
-            <button 
+            <button
               onclick={() => activeFilter = 'bangla'}
               class={`w-full text-left px-2.5 py-1.5 rounded-lg transition ${activeFilter === 'bangla' ? 'text-slate-900 dark:text-white font-semibold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
               🇧🇩 Bangla Unicode
@@ -824,12 +1049,12 @@
 
           <!-- View Switcher: Inbox Stream vs Kanban Board -->
           <div class="flex items-center gap-1 bg-warm-100 dark:bg-slate-800 p-0.5 rounded-md text-[11px]">
-            <button 
+            <button
               onclick={() => viewMode = 'inbox'}
               class="px-2 py-0.5 rounded font-medium transition bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs">
               Inbox
             </button>
-            <button 
+            <button
               onclick={() => viewMode = 'board'}
               class="px-2 py-0.5 rounded font-medium transition text-slate-500 hover:text-slate-800">
               Board
@@ -846,18 +1071,18 @@
           {:else}
             {#each filteredEnquiries as item (item.id)}
               {@const isSelected = selectedEnquiry && selectedEnquiry.id === item.id}
-              
-              <div 
+
+              <div
                 role="button"
                 tabindex="0"
                 onclick={() => selectLead(item.id)}
                 onkeydown={(e) => { if (e.key === 'Enter') selectLead(item.id); }}
-                class={`group relative w-full text-left p-3.5 rounded-xl border transition-all duration-200 cursor-pointer hover:scale-[1.025] hover:-translate-y-1 hover:shadow-xl hover:z-30 origin-center ${item.railClass} ${item.urgencyGlowClass} ${
-                  isSelected 
-                    ? 'bg-orange-50/80 border-orange-400 dark:bg-orange-950/30 dark:border-orange-700 shadow-sm' 
+                class={`group relative w-full text-left p-3.5 rounded-xl border transition-all duration-150 cursor-pointer hover:border-slate-400 dark:hover:border-slate-600 ${item.railClass} ${item.urgencyGlowClass} ${
+                  isSelected
+                    ? 'bg-orange-50/80 border-orange-400 dark:bg-orange-950/30 dark:border-orange-700 shadow-sm'
                     : 'bg-white hover:bg-warm-100/70 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-850'
                 }`}>
-                
+
                 <!-- Card Top Row: Sender, Org, Financial/Seat -->
                 <div class="flex items-start justify-between gap-2">
                   <div class="truncate">
@@ -965,12 +1190,12 @@
           </div>
 
           <div class="flex items-center gap-1 bg-warm-100 dark:bg-slate-800 p-0.5 rounded-md text-[11px]">
-            <button 
+            <button
               onclick={() => viewMode = 'inbox'}
               class="px-2 py-0.5 rounded font-medium transition text-slate-500 hover:text-slate-800">
               Inbox
             </button>
-            <button 
+            <button
               onclick={() => viewMode = 'board'}
               class="px-2 py-0.5 rounded font-medium transition bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs">
               Board
@@ -1007,14 +1232,14 @@
                 {:else}
                   {#each stageItems as item (item.id)}
                     {@const isSelected = selectedEnquiry && selectedEnquiry.id === item.id}
-                    <div 
+                    <div
                       role="button"
                       tabindex="0"
                       onclick={() => selectLead(item.id)}
                       onkeydown={(e) => { if (e.key === 'Enter') selectLead(item.id); }}
-                      class={`group relative w-full text-left p-3 rounded-lg border transition-all duration-200 cursor-pointer hover:scale-[1.025] hover:-translate-y-1 hover:shadow-xl hover:z-30 origin-center ${item.railClass} ${item.urgencyGlowClass} ${
-                        isSelected 
-                          ? 'bg-orange-50/80 border-orange-400 dark:bg-orange-950/30 dark:border-orange-700 shadow-sm' 
+                      class={`group relative w-full text-left p-3 rounded-lg border transition-all duration-150 cursor-pointer hover:border-slate-400 dark:hover:border-slate-600 ${item.railClass} ${item.urgencyGlowClass} ${
+                        isSelected
+                          ? 'bg-orange-50/80 border-orange-400 dark:bg-orange-950/30 dark:border-orange-700 shadow-sm'
                           : 'bg-white hover:bg-warm-100/70 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-850'
                       }`}>
                       <div class="flex items-start justify-between gap-1">
@@ -1069,8 +1294,8 @@
               </h2>
 
               <span class={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
-                selectedEnquiry.businessPriority === 'P0' 
-                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300' 
+                selectedEnquiry.businessPriority === 'P0'
+                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
                   : 'bg-warm-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
               }`}>
                 {selectedEnquiry.businessPriority} · {selectedEnquiry.priorityReason}
@@ -1097,7 +1322,7 @@
                   <span class="font-semibold text-slate-800 dark:text-slate-200">
                     {selectedEnquiry.normalized_phone || selectedEnquiry.phone}
                   </span>
-                  <button 
+                  <button
                     onclick={() => copyToClipboard(selectedEnquiry.normalized_phone || selectedEnquiry.phone, 'Phone number')}
                     class="text-orange-600 hover:text-orange-700 ml-1 text-[11px]"
                     title="Copy normalized phone number">
@@ -1123,7 +1348,7 @@
               </span>
             {/if}
             <label for="stage-select" class="text-xs text-slate-400">Stage:</label>
-            <select 
+            <select
               id="stage-select"
               value={selectedEnquiry.pipeline_stage}
               onchange={(e) => transitionStage(selectedEnquiry.id, (e.target as HTMLSelectElement).value as PipelineStage)}
@@ -1180,7 +1405,7 @@
                 Original Inbound Message
               </span>
               <span class="text-[11px] text-slate-400">
-                Language: <strong class="text-slate-700 dark:text-slate-300">{selectedEnquiry.detected_language}</strong> 
+                Language: <strong class="text-slate-700 dark:text-slate-300">{selectedEnquiry.detected_language}</strong>
                 ({Math.round((selectedEnquiry.language_confidence || 1) * 100)}% confidence)
               </span>
             </div>
@@ -1203,7 +1428,7 @@
               </div>
 
               {#if selectedEnquiry.suggested_reply_alt}
-                <button 
+                <button
                   onclick={() => editableReply = selectedEnquiry.suggested_reply_alt}
                   class="text-[11px] text-orange-600 hover:underline">
                   Switch to Alt Dialect
@@ -1211,7 +1436,7 @@
               {/if}
             </div>
 
-            <textarea 
+            <textarea
               bind:value={editableReply}
               rows="4"
               class="w-full text-sm p-3.5 rounded-xl border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-850 text-slate-900 dark:text-slate-100 font-bengali leading-relaxed focus:outline-none focus:ring-1 focus:ring-orange-600"
@@ -1221,21 +1446,21 @@
             <div class="flex items-center justify-between pt-1">
               <div class="flex items-center gap-2">
                 {#if selectedEnquiry.businessPriority === 'P0'}
-                  <button 
+                  <button
                     onclick={() => transitionTicketStatus(selectedEnquiry.id, 'ESCALATED', 'P0 PR risk escalated to supervisor')}
                     class="text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-lg flex items-center gap-1.5 shadow-xs transition">
                     🚨 Escalate to Supervisor
                   </button>
                 {/if}
 
-                <button 
+                <button
                   onclick={() => copyToClipboard(editableReply, 'Suggested reply')}
                   class="text-xs font-medium bg-warm-100 hover:bg-warm-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 px-3 py-2 rounded-lg transition">
                   📋 Copy Reply
                 </button>
               </div>
 
-              <button 
+              <button
                 onclick={() => approveReply(selectedEnquiry.id)}
                 class="text-xs font-semibold bg-orange-600 hover:bg-orange-500 text-white px-5 py-2 rounded-full flex items-center gap-2 shadow-sm shadow-orange-600/20 active:scale-[0.98] transition">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
@@ -1271,7 +1496,7 @@
             <span class="w-3 h-3 rounded-full bg-orange-600"></span>
             <h3 class="text-sm font-bold text-slate-900 dark:text-white">Ingest Inbound Inquiry / Webhook</h3>
           </div>
-          <button 
+          <button
             onclick={() => showParserModal = false}
             class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-sm">
             ✕
@@ -1281,9 +1506,9 @@
         <div class="space-y-3 text-xs">
           <div>
             <label for="ingest-name" class="block text-slate-500 font-medium mb-1">Customer / Sender Name</label>
-            <input 
+            <input
               id="ingest-name"
-              type="text" 
+              type="text"
               bind:value={ingestSenderName}
               class="w-full px-3 py-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-warm-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-orange-600"
               placeholder="e.g. Tanvir Hossain"
@@ -1293,9 +1518,9 @@
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label for="ingest-phone" class="block text-slate-500 font-medium mb-1">Phone Number (+880)</label>
-              <input 
+              <input
                 id="ingest-phone"
-                type="text" 
+                type="text"
                 bind:value={ingestPhone}
                 class="w-full px-3 py-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-warm-50 dark:bg-slate-800 text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-1 focus:ring-orange-600"
                 placeholder="+8801712345678"
@@ -1304,7 +1529,7 @@
 
             <div>
               <label for="ingest-channel" class="block text-slate-500 font-medium mb-1">Inbound Channel</label>
-              <select 
+              <select
                 id="ingest-channel"
                 bind:value={ingestChannel}
                 class="w-full px-3 py-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-warm-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-orange-600">
@@ -1319,7 +1544,7 @@
 
           <div>
             <label for="ingest-msg" class="block text-slate-500 font-medium mb-1">Raw Customer Inbound Message (Bangla / Banglish / English)</label>
-            <textarea 
+            <textarea
               id="ingest-msg"
               bind:value={ingestMessage}
               rows="4"
@@ -1336,12 +1561,12 @@
           </div>
 
           <div class="flex items-center gap-2">
-            <button 
+            <button
               onclick={() => showParserModal = false}
               class="px-3 py-1.5 rounded-lg text-slate-600 hover:text-slate-800 dark:text-slate-300 dark:hover:text-white text-xs">
               Cancel
             </button>
-            <button 
+            <button
               onclick={ingestCustomMessage}
               class="px-4 py-1.5 rounded-full bg-[#C2410C] hover:bg-[#EA580C] text-white font-semibold text-xs shadow-sm hover:shadow-orange-600/30 active:scale-95 transition">
               Parse & Ingest Inquiry
@@ -1351,6 +1576,7 @@
       </div>
     </div>
   {/if}
+{/if}
 
   <!-- Toast Notification Feedback -->
   {#if copyFeedback}

@@ -11,12 +11,29 @@ export function createTestD1Database() {
 
   const mig1Path = path.resolve(dir, '../migrations/0001_core_crm_schema.sql');
   const mig2Path = path.resolve(dir, '../migrations/0002_seed_knowledge_and_sample_enquiries.sql');
+  const mig3Path = path.resolve(dir, '../migrations/0003_identity_control_plane.sql');
+  const mig4Path = path.resolve(dir, '../migrations/0004_durable_outbound_delivery.sql');
+  const mig5Path = path.resolve(dir, '../migrations/0005_delivery_provider_response.sql');
 
   const mig1 = fs.readFileSync(mig1Path, 'utf8');
   const mig2 = fs.readFileSync(mig2Path, 'utf8');
+  const mig3 = fs.readFileSync(mig3Path, 'utf8');
+  const mig4 = fs.readFileSync(mig4Path, 'utf8');
+  const mig5 = fs.readFileSync(mig5Path, 'utf8');
 
   db.exec(mig1);
   db.exec(mig2);
+  db.exec(mig3);
+  db.exec(mig4);
+  db.exec(mig5);
+  db.exec(`
+    UPDATE users
+    SET password_hash = '$pbkdf2-sha256$i=100000$Y3JtcmVwLXNhbHQtMTIzNA==$tpsQBWQ19YFqOYx+rUDqxSOEnNjsknRmHVvl1FcdBlk=',
+        status = 'ACTIVE',
+        failed_login_count = 0,
+        locked_until = NULL
+    WHERE id = 'usr_rep_1';
+  `);
 
   return {
     rawDb: db,

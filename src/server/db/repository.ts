@@ -3,6 +3,7 @@ import { calculateSlaStatus } from '../../lib/engine/sla.ts';
 import { normalizeBangladeshPhone } from '../../lib/engine/phone.ts';
 import { parseWithAiOrFallback } from '../ai/parser.ts';
 import { sendWhatsAppMessage } from '../adapters/whatsapp.ts';
+import { generateRandomToken } from '../crypto.ts';
 import type { Channel, PipelineStage } from '../../lib/types/crm.ts';
 import type { AuthenticatedUser } from '../auth.ts';
 import type { TicketStatus } from '../validation.ts';
@@ -12,7 +13,7 @@ let inMemoryAudits: any[] = [];
 
 export class CrmRepository {
   /**
-   * Fetch enquiries with dynamic SLA calculation, FTS search, and queue filtering
+   * Fetch enquiries with dynamic SLA calculation, FTS search, and workspace/queue filtering
    */
   static async getEnquiries(
     db: any,
@@ -20,10 +21,13 @@ export class CrmRepository {
     stage?: string,
     simTime?: string,
     environment: string = 'development',
-    search?: string
+    search?: string,
+    actor?: AuthenticatedUser
   ) {
-    // Security check: sim_time is restricted in production
-    const effectiveSimTime = environment === 'production' ? null : (simTime || null);
+    const isProduction = environment === 'production';
+    // Security check: sim_time clock override is strictly forbidden in production
+    const effectiveSimTime = isProduction ? null : (simTime || null);
+    const workspaceId = actor?.workspace_id || 'ws_biai_main';
 
     if (db) {
       try {
@@ -32,7 +36,7 @@ export class CrmRepository {
 
         if (search && search.trim() !== '') {
           sql = `
-            SELECT 
+            SELECT
               CAST(SUBSTR(m.id, 5) AS INTEGER) as id,
               m.id as message_id,
               m.content as raw_message,
@@ -62,12 +66,12 @@ export class CrmRepository {
             JOIN contacts c ON conv.contact_id = c.id
             LEFT JOIN opportunities o ON o.source_message_id = m.id
             LEFT JOIN operational_tickets t ON t.source_message_id = m.id
-            WHERE fts_messages MATCH ?
+            WHERE conv.workspace_id = ? AND fts_messages MATCH ?
           `;
-          params.push(search.trim());
+          params.push(workspaceId, search.trim());
         } else {
           sql = `
-            SELECT 
+            SELECT
               CAST(SUBSTR(m.id, 5) AS INTEGER) as id,
               m.id as message_id,
               m.content as raw_message,
@@ -96,8 +100,9 @@ export class CrmRepository {
             JOIN contacts c ON conv.contact_id = c.id
             LEFT JOIN opportunities o ON o.source_message_id = m.id
             LEFT JOIN operational_tickets t ON t.source_message_id = m.id
-            WHERE m.direction = 'INBOUND'
+            WHERE conv.workspace_id = ? AND m.direction = 'INBOUND'
           `;
+          params.push(workspaceId);
         }
 
         if (stage) {
@@ -156,11 +161,24 @@ export class CrmRepository {
           };
         }
       } catch (err) {
-        console.error('D1 getEnquiries error, falling back to in-memory:', err);
+        console.error('D1 getEnquiries error:', err);
+        if (isProduction) {
+          const error: any = new Error('Database service unavailable');
+          error.status = 503;
+          error.code = 'DB_UNAVAILABLE';
+          throw error;
+        }
       }
     }
 
-    // In-memory fallback
+    if (isProduction) {
+      const error: any = new Error('Database service unavailable: D1 binding missing');
+      error.status = 503;
+      error.code = 'DB_UNAVAILABLE';
+      throw error;
+    }
+
+    // Non-production In-Memory Fallback
     let results = inMemoryRecords.map(rec => {
       const sla = calculateSlaStatus(rec.received_at, rec.first_response_at, effectiveSimTime);
       return {
@@ -175,7 +193,7 @@ export class CrmRepository {
 
     if (search && search.trim() !== '') {
       const q = search.toLowerCase();
-      results = results.filter(r => 
+      results = results.filter(r =>
         (r.raw_message && r.raw_message.toLowerCase().includes(q)) ||
         (r.sender_name && r.sender_name.toLowerCase().includes(q))
       );
@@ -206,13 +224,14 @@ export class CrmRepository {
   }
 
   /**
-   * Transition Sales Pipeline Stage in D1 and in-memory
+   * Transition Sales Pipeline Stage in D1
    */
   static async transitionStage(
     db: any,
     id: number,
     newStage: PipelineStage,
-    actor: AuthenticatedUser
+    actor: AuthenticatedUser,
+    isProduction = false
   ) {
     const oppId = `opp_${id}`;
     const msgId = `msg_${id}`;
@@ -220,8 +239,8 @@ export class CrmRepository {
     if (db) {
       try {
         const opp = await db.prepare(
-          'SELECT id, pipeline_stage, workspace_id FROM opportunities WHERE id = ? OR source_message_id = ?'
-        ).bind(oppId, msgId).first();
+          'SELECT id, pipeline_stage, workspace_id FROM opportunities WHERE (id = ? OR source_message_id = ?) AND workspace_id = ?'
+        ).bind(oppId, msgId, actor.workspace_id).first();
 
         const beforeStage = opp?.pipeline_stage || 'Unknown';
 
@@ -229,8 +248,8 @@ export class CrmRepository {
           db.prepare(`
             UPDATE opportunities
             SET pipeline_stage = ?, updated_at = datetime('now')
-            WHERE id = ? OR source_message_id = ?
-          `).bind(newStage, oppId, msgId),
+            WHERE (id = ? OR source_message_id = ?) AND workspace_id = ?
+          `).bind(newStage, oppId, msgId, actor.workspace_id),
           db.prepare(`
             INSERT INTO audit_events (workspace_id, actor_id, actor_type, actor_role, event_type, entity_type, entity_id, before_state_json, after_state_json)
             VALUES (?, ?, 'USER', ?, 'STAGE_TRANSITION', 'OPPORTUNITY', ?, ?, ?)
@@ -243,11 +262,36 @@ export class CrmRepository {
             JSON.stringify({ stage: newStage, actor_name: actor.full_name })
           )
         ]);
-      } catch (e) {
+
+        return {
+          record: { id, pipeline_stage: newStage, updated_at: new Date().toISOString() },
+          audit: {
+            workspace_id: actor.workspace_id,
+            actor_id: actor.id,
+            event_type: 'STAGE_TRANSITION',
+            entity_id: oppId,
+            after: newStage
+          }
+        };
+      } catch (e: any) {
         console.error('D1 transitionStage error:', e);
+        if (isProduction) {
+          const err: any = new Error(e.message || 'Database error');
+          err.status = 503;
+          err.code = 'DB_UNAVAILABLE';
+          throw err;
+        }
       }
     }
 
+    if (isProduction) {
+      const err: any = new Error('Database service unavailable: D1 binding missing');
+      err.status = 503;
+      err.code = 'DB_UNAVAILABLE';
+      throw err;
+    }
+
+    // Non-production fallback
     const record = inMemoryRecords.find(r => r.id === id);
     if (record) {
       const oldStage = record.pipeline_stage;
@@ -269,9 +313,8 @@ export class CrmRepository {
       return { record, audit: auditRow };
     }
 
-    const genericRecord = { id, pipeline_stage: newStage, updated_at: new Date().toISOString() };
     return {
-      record: genericRecord,
+      record: { id, pipeline_stage: newStage, updated_at: new Date().toISOString() },
       audit: {
         id: inMemoryAudits.length + 1,
         workspace_id: actor.workspace_id,
@@ -286,14 +329,15 @@ export class CrmRepository {
   }
 
   /**
-   * Transition Operational Ticket Status (e.g. ESCALATED, RESOLVED) in D1
+   * Transition Operational Ticket Status in D1
    */
   static async transitionTicketStatus(
     db: any,
     id: number,
     newStatus: TicketStatus,
     notes: string | undefined,
-    actor: AuthenticatedUser
+    actor: AuthenticatedUser,
+    isProduction = false
   ) {
     const tickId = `tick_${id}`;
     const msgId = `msg_${id}`;
@@ -301,8 +345,8 @@ export class CrmRepository {
     if (db) {
       try {
         const ticket = await db.prepare(
-          'SELECT id, ticket_status, workspace_id FROM operational_tickets WHERE id = ? OR source_message_id = ?'
-        ).bind(tickId, msgId).first();
+          'SELECT id, ticket_status, workspace_id FROM operational_tickets WHERE (id = ? OR source_message_id = ?) AND workspace_id = ?'
+        ).bind(tickId, msgId, actor.workspace_id).first();
 
         const beforeStatus = ticket?.ticket_status || 'Unknown';
 
@@ -310,8 +354,8 @@ export class CrmRepository {
           db.prepare(`
             UPDATE operational_tickets
             SET ticket_status = ?, resolution_notes = COALESCE(?, resolution_notes), updated_at = datetime('now')
-            WHERE id = ? OR source_message_id = ?
-          `).bind(newStatus, notes || null, tickId, msgId),
+            WHERE (id = ? OR source_message_id = ?) AND workspace_id = ?
+          `).bind(newStatus, notes || null, tickId, msgId, actor.workspace_id),
           db.prepare(`
             INSERT INTO audit_events (workspace_id, actor_id, actor_type, actor_role, event_type, entity_type, entity_id, before_state_json, after_state_json)
             VALUES (?, ?, 'USER', ?, 'TICKET_STATUS_UPDATED', 'TICKET', ?, ?, ?)
@@ -324,9 +368,33 @@ export class CrmRepository {
             JSON.stringify({ status: newStatus, notes, actor_name: actor.full_name })
           )
         ]);
-      } catch (e) {
+
+        return {
+          record: { id, ticket_status: newStatus, notes, updated_at: new Date().toISOString() },
+          audit: {
+            workspace_id: actor.workspace_id,
+            actor_id: actor.id,
+            event_type: 'TICKET_STATUS_UPDATED',
+            entity_id: tickId,
+            new_status: newStatus
+          }
+        };
+      } catch (e: any) {
         console.error('D1 ticket transition error:', e);
+        if (isProduction) {
+          const err: any = new Error(e.message || 'Database error');
+          err.status = 503;
+          err.code = 'DB_UNAVAILABLE';
+          throw err;
+        }
       }
+    }
+
+    if (isProduction) {
+      const err: any = new Error('Database service unavailable: D1 binding missing');
+      err.status = 503;
+      err.code = 'DB_UNAVAILABLE';
+      throw err;
     }
 
     const record = inMemoryRecords.find(r => r.id === id);
@@ -366,7 +434,8 @@ export class CrmRepository {
   }
 
   /**
-   * Approve and record outbound reply in D1 with WhatsApp delivery dispatch
+   * Approve and record outbound reply in D1 with WhatsApp delivery dispatch.
+   * Enforces truthful provider dispatch check: fails if delivery fails.
    */
   static async recordOutboundReply(
     db: any,
@@ -376,25 +445,149 @@ export class CrmRepository {
     actor: AuthenticatedUser,
     envBindings?: any
   ) {
-    const now = new Date().toISOString();
+    const isProduction = envBindings?.ENVIRONMENT === 'production';
     const msgId = `msg_${id}`;
+    const outMsgId = `msg_out_${generateRandomToken(12)}`;
+    const idempotencyKey = `crm_${actor.workspace_id}_${outMsgId}`;
     let recipientPhone = '';
+    let conversationId = `conv_${id}`;
+    let opportunityId: string | null = null;
 
-    // Find phone for dispatch
+    if (db) {
+      try {
+        const recipient = await db.prepare(`
+          SELECT m.conversation_id, c.normalized_phone, o.id as opp_id
+          FROM messages m
+          JOIN conversations conv ON m.conversation_id = conv.id
+          JOIN contacts c ON conv.contact_id = c.id
+          LEFT JOIN opportunities o ON o.source_message_id = m.id
+          WHERE (m.id = ? OR CAST(SUBSTR(m.id, 5) AS INTEGER) = ?)
+            AND conv.workspace_id = ?
+        `).bind(msgId, id, actor.workspace_id).first();
+        if (recipient) {
+          conversationId = recipient.conversation_id;
+          opportunityId = recipient.opp_id || null;
+        }
+        recipientPhone = recipient?.normalized_phone || '';
+        if (!recipient && isProduction) {
+          const notFound: any = new Error('Enquiry not found in the actor workspace');
+          notFound.status = 404;
+          notFound.code = 'ENQUIRY_NOT_FOUND';
+          throw notFound;
+        }
+      } catch (error) {
+        console.error('D1 recipient lookup error:', error);
+        if ((error as any)?.status === 404) throw error;
+        if (isProduction) {
+          const dbError: any = new Error('Database service unavailable');
+          dbError.status = 503;
+          dbError.code = 'DB_UNAVAILABLE';
+          throw dbError;
+        }
+      }
+
+      if (db) {
+        try {
+          await db.prepare(`
+            INSERT INTO messages (
+              id, conversation_id, direction, channel, external_message_id,
+              sender_raw, phone_raw, content, detected_language, language_confidence,
+              received_at, delivery_status, idempotency_key, retry_count
+            ) VALUES (?, ?, 'OUTBOUND', ?, ?, 'BIAI Staff Agent', ?, ?, 'EN', 1.0,
+              datetime('now'), 'QUEUED', ?, 0)
+          `).bind(
+            outMsgId,
+            conversationId,
+            channel,
+            idempotencyKey,
+            recipientPhone || null,
+            replyText,
+            idempotencyKey
+          ).run();
+        } catch (error: any) {
+          console.error('D1 outbound queue error:', error);
+          const dbError: any = new Error('Unable to queue outbound delivery');
+          dbError.status = 503;
+          dbError.code = 'DB_UNAVAILABLE';
+          throw dbError;
+        }
+      }
+    }
+
     const localRec = inMemoryRecords.find(r => r.id === id);
-    if (localRec) {
+    if (!recipientPhone && localRec && !isProduction) {
       recipientPhone = localRec.phone_normalized || localRec.phone_raw || '';
     }
 
-    // 1. Dispatch through WhatsApp Adapter
+    // 1. Dispatch through WhatsApp Adapter (allowMock only in test env)
     let deliveryResult: any = null;
     if (channel === 'WhatsApp') {
+      if (!recipientPhone && isProduction) {
+        const error: any = new Error('Recipient phone number is required for WhatsApp dispatch');
+        error.status = 422;
+        error.code = 'RECIPIENT_CONTACT_MISSING';
+        throw error;
+      }
       deliveryResult = await sendWhatsAppMessage({
         recipientPhone: recipientPhone || '+8801700000000',
         messageText: replyText,
         token: envBindings?.META_WHATSAPP_TOKEN,
-        phoneNumberId: envBindings?.META_PHONE_NUMBER_ID
+        phoneNumberId: envBindings?.META_PHONE_NUMBER_ID,
+        idempotencyKey,
+        allowMock: !isProduction
       });
+    } else if (isProduction) {
+      const error: any = new Error(`Outbound provider is not configured for channel '${channel}'`);
+      error.status = 501;
+      error.code = 'CHANNEL_PROVIDER_UNAVAILABLE';
+      throw error;
+    } else {
+      deliveryResult = {
+        success: true,
+        messageId: `msg_${channel.toLowerCase()}_${Date.now()}`,
+        provider: 'MOCK_ADAPTER',
+        status: 'SENT',
+        timestamp: new Date().toISOString()
+      };
+    }
+
+    // Truthful reporting: If provider delivery failed, do NOT mark as SENT
+    if (!deliveryResult.success || deliveryResult.status === 'FAILED') {
+      if (db) {
+        try {
+          await db.batch([
+            db.prepare(`
+              UPDATE messages
+              SET delivery_status = 'FAILED', failure_code = ?, retry_count = retry_count + 1,
+                  next_retry_at = datetime('now', '+15 minutes'), last_provider_response = ?
+              WHERE id = ? AND idempotency_key = ?
+              `).bind(
+                deliveryResult.error || 'PROVIDER_FAILURE',
+                JSON.stringify({ provider: deliveryResult.provider, status: deliveryResult.status, error: deliveryResult.error }),
+                outMsgId,
+                idempotencyKey
+              ),
+            db.prepare(`
+              INSERT INTO audit_events (workspace_id, actor_id, actor_type, actor_role, event_type, entity_type, entity_id, before_state_json, after_state_json)
+              VALUES (?, ?, 'USER', ?, 'MANUAL_DISPATCH_REQUIRED', 'MESSAGE', ?, '{"reply_status":"QUEUED"}', ?)
+            `).bind(
+              actor.workspace_id,
+              actor.id,
+              actor.role,
+              String(id),
+              JSON.stringify({ error: deliveryResult.error, channel, status: 'FAILED', retry_at: '15 minutes' })
+            )
+          ]);
+        } catch (e) {
+          console.error('Audit event log error on dispatch failure:', e);
+        }
+      }
+
+      const failError: any = new Error(deliveryResult.error || 'Outbound dispatch failed');
+      failError.status = 502;
+      failError.code = 'MANUAL_DISPATCH_REQUIRED';
+      failError.delivery = deliveryResult;
+      throw failError;
     }
 
     if (db) {
@@ -405,11 +598,8 @@ export class CrmRepository {
           JOIN conversations conv ON m.conversation_id = conv.id
           JOIN contacts c ON conv.contact_id = c.id
           LEFT JOIN opportunities o ON o.source_message_id = m.id
-          WHERE m.id = ? OR CAST(SUBSTR(m.id, 5) AS INTEGER) = ?
-        `).bind(msgId, id).first();
-
-        const convId = row?.conversation_id || `conv_${id}`;
-        const outMsgId = `msg_out_${Date.now()}`;
+          WHERE (m.id = ? OR CAST(SUBSTR(m.id, 5) AS INTEGER) = ?) AND conv.workspace_id = ?
+        `).bind(msgId, id, actor.workspace_id).first();
 
         await db.batch([
           db.prepare(`
@@ -417,12 +607,20 @@ export class CrmRepository {
             SET first_response_at = datetime('now'),
                 pipeline_stage = CASE WHEN pipeline_stage = 'New' THEN 'Contacted' ELSE pipeline_stage END,
                 updated_at = datetime('now')
-            WHERE source_message_id = ? OR id = ?
-          `).bind(msgId, row?.opp_id || `opp_${id}`),
+            WHERE (source_message_id = ? OR id = ?) AND workspace_id = ?
+          `).bind(msgId, row?.opp_id || `opp_${id}`, actor.workspace_id),
           db.prepare(`
-            INSERT INTO messages (id, conversation_id, direction, channel, external_message_id, sender_raw, content, detected_language, language_confidence, received_at, delivery_status)
-            VALUES (?, ?, 'OUTBOUND', ?, ?, 'BIAI Staff Agent', ?, 'EN', 1.0, datetime('now'), 'SENT')
-          `).bind(outMsgId, convId, channel, deliveryResult?.messageId || `msg_sim_${Date.now()}`, replyText),
+            UPDATE messages
+            SET delivery_status = 'SENT', provider_message_id = ?, external_message_id = ?,
+                failure_code = NULL, next_retry_at = NULL, last_provider_response = ?
+            WHERE id = ? AND idempotency_key = ?
+          `).bind(
+            deliveryResult?.messageId || null,
+            deliveryResult?.messageId || idempotencyKey,
+            JSON.stringify({ provider: deliveryResult?.provider, status: deliveryResult?.status }),
+            outMsgId,
+            idempotencyKey
+          ),
           db.prepare(`
             INSERT INTO audit_events (workspace_id, actor_id, actor_type, actor_role, event_type, entity_type, entity_id, before_state_json, after_state_json)
             VALUES (?, ?, 'USER', ?, 'OUTBOUND_REPLY_SENT', 'MESSAGE', ?, '{"reply_status":"PENDING"}', ?)
@@ -434,13 +632,19 @@ export class CrmRepository {
             JSON.stringify({ reply_status: 'SENT', channel, actor_name: actor.full_name, provider_id: deliveryResult?.messageId })
           )
         ]);
-      } catch (e) {
+      } catch (e: any) {
         console.error('D1 recordOutboundReply error:', e);
+        if (isProduction) {
+          const err: any = new Error(e.message || 'Database error');
+          err.status = 503;
+          err.code = 'DB_UNAVAILABLE';
+          throw err;
+        }
       }
     }
 
     if (localRec) {
-      localRec.first_response_at = now;
+      localRec.first_response_at = new Date().toISOString();
       localRec.outbound_reply = replyText;
       localRec.reply_status = 'SENT';
       if (localRec.pipeline_stage === 'New') {
@@ -457,15 +661,78 @@ export class CrmRepository {
       entity_id: id,
       channel,
       delivery: deliveryResult,
-      timestamp: now
+      timestamp: new Date().toISOString()
     };
     inMemoryAudits.push(auditRow);
 
     return {
-      record: localRec || { id, reply_status: 'SENT', first_response_at: now },
+      record: localRec || { id, reply_status: 'SENT', first_response_at: new Date().toISOString() },
       audit: auditRow,
       delivery: deliveryResult
     };
+  }
+
+  /**
+   * Durable Webhook Event Claims & Idempotency Ledger
+   */
+  static async claimWebhookEvent(
+    db: any,
+    workspaceId: string,
+    provider: string,
+    externalEventId: string,
+    eventType: string,
+    payloadHash: string
+  ): Promise<{ duplicate: boolean; eventId?: number }> {
+    if (!db) return { duplicate: false };
+
+    try {
+      // Check existing
+      const existing = await db.prepare(`
+        SELECT id, status FROM webhook_events
+        WHERE workspace_id = ? AND provider = ? AND external_event_id = ?
+      `).bind(workspaceId, provider, externalEventId).first();
+
+      if (existing) {
+        return { duplicate: true, eventId: existing.id };
+      }
+
+      // Claim record
+      const result = await db.prepare(`
+        INSERT INTO webhook_events (workspace_id, provider, external_event_id, event_type, payload_hash, status, received_at)
+        VALUES (?, ?, ?, ?, ?, 'RECEIVED', datetime('now'))
+      `).bind(workspaceId, provider, externalEventId, eventType, payloadHash).run();
+
+      return { duplicate: false, eventId: result.meta?.last_row_id };
+    } catch (err) {
+      console.error('Webhook claim error:', err);
+      return { duplicate: false };
+    }
+  }
+
+  static async markWebhookProcessed(db: any, eventId?: number) {
+    if (!db || !eventId) return;
+    try {
+      await db.prepare(`
+        UPDATE webhook_events
+        SET status = 'PROCESSED', processed_at = datetime('now')
+        WHERE id = ?
+      `).bind(eventId).run();
+    } catch (e) {
+      console.error('Failed to mark webhook processed:', e);
+    }
+  }
+
+  static async markWebhookFailed(db: any, eventId?: number, failureCode?: string) {
+    if (!db || !eventId) return;
+    try {
+      await db.prepare(`
+        UPDATE webhook_events
+        SET status = 'FAILED', failure_code = ?
+        WHERE id = ?
+      `).bind(failureCode || 'PROCESSING_ERROR', eventId).run();
+    } catch (e) {
+      console.error('Failed to mark webhook failed:', e);
+    }
   }
 
   /**
@@ -596,15 +863,16 @@ export class CrmRepository {
 
         batchStatements.push(
           db.prepare(`
-            INSERT INTO ai_extractions (id, message_id, model_provider, model_version, prompt_version, overall_confidence, raw_response_json, extracted_fields_json, validation_status, human_reviewed)
-            VALUES (?, ?, ?, 'v2.1', 'v2', ?, ?, ?, 'PASSED', 0)
+            INSERT INTO ai_extractions (id, message_id, model_provider, model_version, prompt_version, overall_confidence, raw_response_json, extracted_fields_json, validation_status, human_reviewed, fallback_reason)
+            VALUES (?, ?, ?, 'v2.1', 'v2', ?, ?, ?, 'PASSED', 0, ?)
           `).bind(
             aiId,
             msgId,
             aiResult.provider,
             aiResult.confidence,
             JSON.stringify(extraction.suggested_replies),
-            JSON.stringify(extraction)
+            JSON.stringify(extraction),
+            aiResult.fallbackReason || null
           ),
           db.prepare(`
             INSERT INTO audit_events (workspace_id, actor_id, actor_type, actor_role, event_type, entity_type, entity_id, before_state_json, after_state_json)
