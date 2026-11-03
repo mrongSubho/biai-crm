@@ -7,6 +7,7 @@
   import AccountMenu from '../lib/ui/AccountMenu.svelte';
   import AccountControlModal from '../lib/ui/AccountControlModal.svelte';
   import MessagingCenterModal from '../lib/ui/MessagingCenterModal.svelte';
+  import Icon from '../lib/ui/Icon.svelte';
   import type { ExtractionResult, PipelineStage, Channel } from '../lib/types/crm';
 
   // --- THEME & VIEWPORT STATE ---
@@ -219,9 +220,9 @@
   function toggleAudio() {
     audioEnabled = soundFx.toggle();
     if (audioEnabled) {
-      showFeedback('🔊 Audio FX enabled (Web Audio synthesized)');
+      showFeedback('Audio FX enabled (Web Audio synthesized)');
     } else {
-      showFeedback('🔇 Audio FX muted');
+      showFeedback('Audio FX muted');
     }
   }
 
@@ -259,7 +260,7 @@
 
       if (isMet) {
         urgency = 'met';
-        urgencyLabel = '✓ SLA Met';
+        urgencyLabel = 'SLA Met';
       } else if (sla.isBreached || businessPriority === 'P0') {
         urgency = 'critical';
         const overdueHours = Math.abs(sla.hoursRemaining);
@@ -616,8 +617,9 @@
       {#if searchQuery}
         <button
           onclick={() => searchQuery = ''}
-          class="absolute inset-y-0 right-2 my-auto h-5 px-1.5 text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 flex items-center">
-          ✕ Clear
+          class="absolute inset-y-0 right-2 my-auto h-5 px-1.5 text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 flex items-center gap-1">
+          <Icon name="x" size={11} />
+          <span>Clear</span>
         </button>
       {:else}
         <kbd class="hidden sm:inline-block absolute right-2.5 top-2 text-[10px] text-slate-400 dark:text-slate-500 font-mono pointer-events-none border border-slate-200 dark:border-slate-800 px-1 rounded">⌘K</kbd>
@@ -632,7 +634,7 @@
         onclick={() => { messagingContext = null; showMessagingModal = true; }}
         class="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-warm-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800 transition flex items-center gap-1.5 shadow-xs"
         title="Open Internal Command Messaging">
-        <span>💬</span>
+        <Icon name="message-square" size={14} class="text-orange-600 dark:text-orange-400" />
         <span class="hidden md:inline">Messages</span>
         {#if unreadSummary.unreadDirectivesCount > 0}
           <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-rose-600 text-white animate-pulse">
@@ -802,8 +804,9 @@
         </button>
         <button
           onclick={() => { evaluatorMode = false; simTime = '2026-10-28T12:00:00'; }}
-          class="ml-2 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 underline text-[11px]">
-          ✕ Exit
+          class="ml-2 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 underline text-[11px] flex items-center gap-1">
+          <Icon name="x" size={11} />
+          <span>Exit</span>
         </button>
       </div>
     </div>
@@ -915,26 +918,30 @@
             <button
               type="button"
               onclick={() => activeFilter = 'p0'}
-              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition ${activeFilter === 'p0' ? 'text-rose-700 dark:text-rose-300 font-semibold bg-rose-50/50 dark:bg-rose-950/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
-              🚨 P0 PR Threats
+              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition flex items-center gap-1.5 ${activeFilter === 'p0' ? 'text-rose-700 dark:text-rose-300 font-semibold bg-rose-50/50 dark:bg-rose-950/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+              <Icon name="shield-alert" size={13} class="text-rose-500" />
+              <span>P0 PR Threats</span>
             </button>
             <button
               type="button"
               onclick={() => activeFilter = 'at_risk'}
-              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition ${activeFilter === 'at_risk' ? 'text-amber-700 dark:text-amber-300 font-semibold bg-amber-50/50 dark:bg-amber-950/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
-              ⚠️ At Risk (&lt;12h)
+              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition flex items-center gap-1.5 ${activeFilter === 'at_risk' ? 'text-amber-700 dark:text-amber-300 font-semibold bg-amber-50/50 dark:bg-amber-950/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+              <Icon name="clock" size={13} class="text-amber-500" />
+              <span>At Risk (&lt;12h)</span>
             </button>
             <button
               type="button"
               onclick={() => activeFilter = 'corporate'}
-              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition ${activeFilter === 'corporate' ? 'text-slate-900 dark:text-white font-semibold bg-warm-100 dark:bg-slate-800' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
-              🏢 Corporate Whales
+              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition flex items-center gap-1.5 ${activeFilter === 'corporate' ? 'text-slate-900 dark:text-white font-semibold bg-warm-100 dark:bg-slate-800' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+              <Icon name="building" size={13} class="text-indigo-500" />
+              <span>Corporate Whales</span>
             </button>
             <button
               type="button"
               onclick={() => activeFilter = 'bangla'}
-              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition ${activeFilter === 'bangla' ? 'text-slate-900 dark:text-white font-semibold bg-warm-100 dark:bg-slate-800' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
-              🇧🇩 Bangla Unicode
+              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition flex items-center gap-1.5 ${activeFilter === 'bangla' ? 'text-slate-900 dark:text-white font-semibold bg-warm-100 dark:bg-slate-800' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+              <span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+              <span>Bangla Unicode</span>
             </button>
           </div>
         </div>
@@ -973,7 +980,9 @@
             <button
               type="button"
               onclick={() => mobileNavOpen = false}
-              class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-sm">✕</button>
+              class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1">
+              <Icon name="x" size={16} />
+            </button>
           </div>
 
           <div class="flex-1 overflow-y-auto overscroll-contain p-3 space-y-4 min-h-0">
@@ -1299,14 +1308,15 @@
                   <button
                     type="button"
                     onclick={() => copyToClipboard(selectedEnquiry.normalized_phone || selectedEnquiry.phone, 'Phone number')}
-                    class="text-orange-600 hover:text-orange-700 ml-1 text-[11px]"
+                    class="text-orange-600 hover:text-orange-700 ml-1 inline-flex items-center"
                     title="Copy normalized phone number">
-                    📋
+                    <Icon name="copy" size={12} />
                   </button>
                 </span>
               {:else}
-                <span class="text-amber-600 font-sans text-[11px]">
-                  ⚠️ Missing Phone (Ask in reply)
+                <span class="text-amber-600 font-sans text-[11px] inline-flex items-center gap-1">
+                  <Icon name="phone-off" size={12} />
+                  <span>Missing Phone (Ask in reply)</span>
                 </span>
               {/if}
 
@@ -1340,9 +1350,9 @@
                 messagingContext = { type: 'ENQUIRY', id: String(selectedEnquiry.id), label: selectedEnquiry.sender_name };
                 showMessagingModal = true;
               }}
-              class="px-2.5 py-1 rounded-lg bg-warm-100 hover:bg-warm-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium transition flex items-center gap-1 shrink-0"
+              class="px-2.5 py-1 rounded-lg bg-warm-100 hover:bg-warm-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium transition flex items-center gap-1.5 shrink-0"
               title="Dispatch internal command directive for this inquiry">
-              <span>💬</span>
+              <Icon name="message-square" size={13} class="text-orange-600 dark:text-orange-400" />
               <span class="hidden sm:inline">Directive</span>
             </button>
           </div>
@@ -1438,15 +1448,17 @@
                     type="button"
                     onclick={() => transitionTicketStatus(selectedEnquiry.id, 'ESCALATED', 'P0 PR risk escalated to supervisor')}
                     class="text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition">
-                    🚨 Escalate
+                    <Icon name="shield-alert" size={13} />
+                    <span>Escalate</span>
                   </button>
                 {/if}
 
                 <button
                   type="button"
                   onclick={() => copyToClipboard(editableReply, 'Suggested reply')}
-                  class="text-xs font-medium bg-warm-100 hover:bg-warm-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 px-3 py-1.5 rounded-lg transition">
-                  📋 Copy Reply
+                  class="text-xs font-medium bg-warm-100 hover:bg-warm-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
+                  <Icon name="copy" size={13} />
+                  <span>Copy Reply</span>
                 </button>
               </div>
 
@@ -1500,8 +1512,8 @@
           <button
             type="button"
             onclick={() => showParserModal = false}
-            class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-sm">
-            ✕
+            class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1">
+            <Icon name="x" size={16} />
           </button>
         </div>
 
@@ -1616,9 +1628,9 @@
       <button
         type="button"
         onclick={() => copyFeedback = null}
-        class="text-slate-400 hover:text-white dark:hover:text-slate-900 text-sm ml-1"
+        class="text-slate-400 hover:text-white dark:hover:text-slate-900 p-0.5 ml-1"
         aria-label="Dismiss notification">
-        ✕
+        <Icon name="x" size={13} />
       </button>
     </div>
   {/if}
