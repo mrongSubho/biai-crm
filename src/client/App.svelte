@@ -558,7 +558,7 @@
 
         <!-- Switch to Task 2 Corporate Pipeline -->
         <a
-          href="/task2"
+          href="https://biaileads.mrong.tech"
           title="Switch to Corporate Pipeline workspace"
           class="py-4 px-3 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition">
           Corporate Pipeline
