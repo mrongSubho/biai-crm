@@ -34,5 +34,6 @@ export const ParseMessageSchema = z.object({
 export const EnquiryQuerySchema = z.object({
   queue: z.enum(['all', 'sales', 'support', 'escalation', 'careers', 'spam']).default('all'),
   stage: PipelineStageEnum.optional(),
-  sim_time: z.string().optional()
+  sim_time: z.string().optional(),
+  search: z.string().optional()
 });

@@ -59,7 +59,7 @@ app.post('/api/v1/enquiries/parse', async (c) => {
 
     const { content, senderRaw, phoneRaw, channel } = validation.data;
     const actor = c.get('actor');
-    const result = await CrmRepository.ingestMessage(c.env?.DB, { content, senderRaw, phoneRaw, channel }, actor);
+    const result = await CrmRepository.ingestMessage(c.env?.DB, { content, senderRaw, phoneRaw, channel }, actor, c.env);
 
     return c.json({
       success: true,
@@ -72,22 +72,23 @@ app.post('/api/v1/enquiries/parse', async (c) => {
   }
 });
 
-// 3. List Enquiries & Tickets (with queue, stage, and safe SLA calculations)
+// 3. List Enquiries & Tickets (with queue, stage, FTS search, and safe SLA calculations)
 app.get('/api/v1/enquiries', async (c) => {
   const query = EnquiryQuerySchema.safeParse({
     queue: c.req.query('queue'),
     stage: c.req.query('stage'),
-    sim_time: c.req.query('sim_time')
+    sim_time: c.req.query('sim_time'),
+    search: c.req.query('search') || c.req.query('q')
   });
 
   if (!query.success) {
     return c.json({ error: 'Invalid query parameters', details: query.error.format() }, 400);
   }
 
-  const { queue, stage, sim_time } = query.data;
+  const { queue, stage, sim_time, search } = query.data;
   const env = c.env?.ENVIRONMENT || 'development';
 
-  const result = await CrmRepository.getEnquiries(c.env?.DB, queue, stage, sim_time, env);
+  const result = await CrmRepository.getEnquiries(c.env?.DB, queue, stage, sim_time, env, search);
   return c.json(result);
 });
 
@@ -181,11 +182,18 @@ app.post('/api/v1/enquiries/:id/reply', async (c) => {
   const actor = c.get('actor');
 
   try {
-    const result = await CrmRepository.recordOutboundReply(c.env?.DB, id, replyText, channel, actor);
-    return c.json({ success: true, data: result.record, audit: result.audit });
+    const result = await CrmRepository.recordOutboundReply(c.env?.DB, id, replyText, channel, actor, c.env);
+    return c.json({ success: true, data: result.record, audit: result.audit, delivery: result.delivery });
   } catch (err: any) {
     return c.json({ error: err.message || 'Reply sending failed' }, 400);
   }
+});
+
+// 6.1 Ground-Truth Knowledge Base Query
+app.get('/api/v1/knowledge-base', async (c) => {
+  const category = c.req.query('category');
+  const kb = await CrmRepository.getKnowledgeBase(c.env?.DB, category);
+  return c.json({ success: true, count: kb.length, items: kb });
 });
 
 // 7. Executive Weekly AI Digest
@@ -294,7 +302,7 @@ app.post('/api/webhooks/meta', async (c) => {
     senderRaw: senderName,
     phoneRaw: senderPhone,
     channel: 'WhatsApp'
-  }, webhookActor);
+  }, webhookActor, c.env);
 
   return c.json({
     status: 'received',
