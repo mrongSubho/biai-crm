@@ -5,6 +5,8 @@
   import { soundFx } from '../lib/audio/sound_fx.ts';
   import { urgencyPresentation, type Urgency } from '../lib/ui/status';
   import AccountMenu from '../lib/ui/AccountMenu.svelte';
+  import AccountControlModal from '../lib/ui/AccountControlModal.svelte';
+  import MessagingCenterModal from '../lib/ui/MessagingCenterModal.svelte';
   import type { ExtractionResult, PipelineStage, Channel } from '../lib/types/crm';
 
   // --- THEME & VIEWPORT STATE ---
@@ -12,6 +14,10 @@
   let viewMode = $state<'inbox' | 'board'>('inbox');
   let evaluatorMode = $state(false);
   let showParserModal = $state(false);
+  let showAccountModal = $state(false);
+  let showMessagingModal = $state(false);
+  let messagingContext = $state<{ type: 'ENQUIRY' | 'LEAD'; id: string; label?: string } | null>(null);
+  let unreadSummary = $state<{ unreadCount: number; unreadDirectivesCount: number }>({ unreadCount: 0, unreadDirectivesCount: 0 });
   let mobileNavOpen = $state(false);
   let audioEnabled = $state(soundFx.enabled);
 
@@ -63,6 +69,7 @@
       if (res.ok) {
         currentUser = await res.json();
         await loadEnquiries();
+        await refreshUnreadMessages();
       } else {
         currentUser = null;
         enquiries = [];
@@ -71,6 +78,19 @@
       currentUser = null;
     } finally {
       authChecking = false;
+    }
+  }
+
+  async function refreshUnreadMessages() {
+    if (!currentUser) return;
+    try {
+      const res = await fetch('/api/v1/messages/unread-summary');
+      const data = await res.json();
+      if (res.ok) {
+        unreadSummary = data;
+      }
+    } catch (e) {
+      console.error(e);
     }
   }
 
@@ -606,6 +626,25 @@
 
     <!-- Right: Utility Controls & Primary CTA -->
     <div class="flex items-center gap-2 shrink-0">
+      <!-- Command Messages Button with Unread Badge -->
+      <button
+        type="button"
+        onclick={() => { messagingContext = null; showMessagingModal = true; }}
+        class="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-warm-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800 transition flex items-center gap-1.5 shadow-xs"
+        title="Open Internal Command Messaging">
+        <span>💬</span>
+        <span class="hidden md:inline">Messages</span>
+        {#if unreadSummary.unreadDirectivesCount > 0}
+          <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-rose-600 text-white animate-pulse">
+            {unreadSummary.unreadDirectivesCount}
+          </span>
+        {:else if unreadSummary.unreadCount > 0}
+          <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-orange-600 text-white">
+            {unreadSummary.unreadCount}
+          </span>
+        {/if}
+      </button>
+
       <!-- Evaluator Mode Sandbox Toggle (Calm state indicator, zero pulse) -->
       <button
         onclick={() => evaluatorMode = !evaluatorMode}
@@ -910,6 +949,9 @@
           {audioEnabled}
           onToggleAudio={toggleAudio}
           onLogout={handleLogout}
+          unreadCount={unreadSummary.unreadCount}
+          onOpenAccountControl={() => showAccountModal = true}
+          onOpenMessaging={() => { messagingContext = null; showMessagingModal = true; }}
         />
       </div>
     </aside>
@@ -966,6 +1008,9 @@
               {audioEnabled}
               onToggleAudio={toggleAudio}
               onLogout={handleLogout}
+              unreadCount={unreadSummary.unreadCount}
+              onOpenAccountControl={() => { mobileNavOpen = false; showAccountModal = true; }}
+              onOpenMessaging={() => { mobileNavOpen = false; messagingContext = null; showMessagingModal = true; }}
             />
           </div>
         </div>
@@ -1287,6 +1332,19 @@
                 <option value={st}>{st}</option>
               {/each}
             </select>
+
+            <!-- Command Message Quick Escalation -->
+            <button
+              type="button"
+              onclick={() => {
+                messagingContext = { type: 'ENQUIRY', id: String(selectedEnquiry.id), label: selectedEnquiry.sender_name };
+                showMessagingModal = true;
+              }}
+              class="px-2.5 py-1 rounded-lg bg-warm-100 hover:bg-warm-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium transition flex items-center gap-1 shrink-0"
+              title="Dispatch internal command directive for this inquiry">
+              <span>💬</span>
+              <span class="hidden sm:inline">Directive</span>
+            </button>
           </div>
         </div>
 
@@ -1523,6 +1581,30 @@
     </div>
   {/if}
 {/if}
+
+  <!-- Account Control Modal -->
+  <AccountControlModal
+    isOpen={showAccountModal}
+    currentUser={currentUser}
+    workspaceType="CRM"
+    onClose={() => showAccountModal = false}
+    onUserUpdated={(u) => { if (currentUser) currentUser = { ...currentUser, ...u }; }}
+  />
+
+  <!-- Messaging Center Modal -->
+  <MessagingCenterModal
+    isOpen={showMessagingModal}
+    currentUser={currentUser}
+    initialContext={messagingContext}
+    workspaceType="CRM"
+    onClose={() => { showMessagingModal = false; messagingContext = null; refreshUnreadMessages(); }}
+    onNavigateContext={(type, id) => {
+      if (type === 'ENQUIRY') {
+        const numId = parseInt(id.replace('ENQ-', ''), 10);
+        if (!isNaN(numId)) selectLead(numId);
+      }
+    }}
+  />
 
   <!-- Toast Notification Feedback (Calm, Non-Bouncing, Accessible Live Region) -->
   {#if copyFeedback}
