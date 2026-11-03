@@ -31,8 +31,8 @@
   } | null>(null);
   let csrfToken = $state('');
   let authChecking = $state(true);
-  let loginEmail = $state('tanvir@biai.com.bd');
-  let loginPassword = $state('RepPassword2026!');
+  let loginEmail = $state('');
+  let loginPassword = $state('');
   let loginMfaCode = $state('');
   let loginRequiresMfa = $state(false);
   let loginError = $state<string | null>(null);
@@ -134,12 +134,6 @@
     currentUser = null;
     csrfToken = '';
     enquiries = [];
-  }
-
-  function quickLogin(email: string, pass: string) {
-    loginEmail = email;
-    loginPassword = pass;
-    handleLogin();
   }
 
   // --- KEYBOARD & THEME INITIALIZATION ---
@@ -762,33 +756,6 @@
           </button>
         </form>
 
-        <!-- Quick Operator Access for Evaluation/Demo -->
-        <div class="mt-6 pt-5 border-t border-warm-200 dark:border-slate-800">
-          <div class="text-[11px] font-semibold text-slate-500 mb-2">Demo / Evaluation Profiles:</div>
-          <div class="grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              onclick={() => quickLogin('admin@biai.com.bd', 'AdminPassword2026!')}
-              class="text-[10px] p-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-warm-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-orange-500 transition text-center">
-              <div class="font-bold">Tier 0</div>
-              <div class="text-[9px] opacity-75">Platform Owner</div>
-            </button>
-            <button
-              type="button"
-              onclick={() => quickLogin('supervisor@biai.com.bd', 'SupervisorPassword2026!')}
-              class="text-[10px] p-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-warm-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-orange-500 transition text-center">
-              <div class="font-bold">Tier 2</div>
-              <div class="text-[9px] opacity-75">Team Lead</div>
-            </button>
-            <button
-              type="button"
-              onclick={() => quickLogin('tanvir@biai.com.bd', 'RepPassword2026!')}
-              class="text-[10px] p-2 rounded-lg border border-warm-200 dark:border-slate-700 bg-warm-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-orange-500 transition text-center">
-              <div class="font-bold">Tier 3</div>
-              <div class="text-[9px] opacity-75">Specialist</div>
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   {:else}
