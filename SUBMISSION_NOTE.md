@@ -4,7 +4,6 @@
 **Submission Date:** 5 November 2026  
 **Live Application:** [https://biaicrm.mrong.tech](https://biaicrm.mrong.tech)  
 **Code Repository:** [https://github.com/mrongSubho/biai-crm](https://github.com/mrongSubho/biai-crm)  
-**Automated Tests:** 48 / 48 Passing (Vitest)  
 **Walkthrough Video (4.5 min):** [Loom Video URL]
 
 ---
@@ -12,11 +11,12 @@
 ### Tech Stack & Architecture Choices
 
 * **Runtime:** Cloudflare Workers (Edge V8 Isolates)
+* **BACKEND & CONTROL:** Hono v4
 * **Database:** Cloudflare D1 (Distributed Edge SQLite)
 * **Frontend:** Svelte 5 (Runes)
 
 **Why this stack:**
-* **Instant local performance:** Cloudflare Workers execute directly at Cloudflare’s Dhaka edge node (<50 ms response), avoiding the high latency and cold-start delays common with traditional servers.
+* **Instant local performance:** Cloudflare Workers execute directly at Cloudflare’s Dhaka edge node, avoiding the high latency and cold-start delays common with traditional servers.
 * **Zero-maintenance relational storage:** Cloudflare D1 provides lightweight, ACID-compliant SQLite at the edge—guaranteeing consistent lead status transitions, full message histories, and zero server management overhead.
 * **Ultra-lean UI:** Svelte 5 compiles down to raw JavaScript (<80 KB gzipped) without the virtual-DOM overhead of React, keeping the dashboard snappy even on patchy mobile data.
 
@@ -32,8 +32,8 @@ I built this CRM to solve those exact daily headaches for the BIAI team:
 * **Smart Triage that Cuts Through the Noise**: Instantly categorizes inbound messages into active sales leads, support/billing, or spam. It flags critical risks (like public refund threats) for priority de-escalation and surfaces repeat reach-outs (e.g. recognizing Rafi Ahmed followed up twice) so hot leads never go cold.
 * **Human-Ready Conversation Stream**: Counselors can view the full back-and-forth dialogue, take internal scratchpad notes (`+ Note`) attached to the lead, and draft replies with a single click.
 * **Natural Language & Dialect Matching**: Suggested replies adapt to how the customer writes—switching seamlessly between **Bangla**, **Banglish**, and **English**, with tone presets (**Professional**, **Friendly**, **Direct**, or **Executive**).
-* **48-Hour Response SLA Tracker**: Clear countdowns show exactly how much time is left to reply—or how long a message is overdue in plain hours and minutes (e.g., `1h 55m overdue`), without confusing negative decimals.
-* **Weekly Executive Summary**: A dedicated report covering Saturday to Friday that gives management a bird's-eye view of lead volume, active pipeline value, channel breakdown, and missing phone numbers.
+* **48-Hour Response SLA Tracker**: Clear countdowns show exactly how much time is left to reply—or how long a message is overdue in plain hours and minutes.
+* **Weekly Executive Summary**: A dedicated report that gives management a bird's-eye view of lead volume, active pipeline value, channel breakdown, and missing phone numbers.
 
 ---
 
