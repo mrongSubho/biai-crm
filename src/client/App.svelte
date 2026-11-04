@@ -2280,40 +2280,40 @@
                   Suggested Reply
                 </span>
 
-                <!-- Subtle AI Engine SVG Badge (Gemini / Workers AI / Local) -->
+                <!-- Subtle AI Engine Clickable SVG Icon (No label) -->
                 {#if selectedEnquiry}
                   {#if (selectedEnquiry.ai_provider || '').includes('gemini')}
                     <button
                       type="button"
                       onclick={cycleAiProvider}
-                      title="AI Inference: Google Gemini 2.5 Flash API (Click to cycle provider)"
-                      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/70 dark:hover:bg-indigo-900/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/60 transition shadow-2xs shrink-0 cursor-pointer">
-                      <svg class="w-2.5 h-2.5 text-indigo-600 dark:text-indigo-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                      title="AI: Google Gemini 2.5 Flash API (Click to cycle)"
+                      aria-label="Google Gemini 2.5 Flash API"
+                      class="inline-flex items-center justify-center p-1 rounded-md text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 transition shrink-0 cursor-pointer">
+                      <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 2C12 7.52285 7.52285 12 2 12C7.52285 12 12 16.4772 12 22C12 16.4772 16.4772 12 22 12C16.4772 12 12 7.52285 12 2Z"/>
                       </svg>
-                      <span>Gemini 2.5 Flash</span>
                     </button>
                   {:else if (selectedEnquiry.ai_provider || '').includes('workers') || (selectedEnquiry.ai_provider || '').includes('llama')}
                     <button
                       type="button"
                       onclick={cycleAiProvider}
-                      title="Edge Inference: Cloudflare Workers AI · LLaMA 3.3 70B (Click to cycle provider)"
-                      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-orange-50 hover:bg-orange-100 dark:bg-orange-950/70 dark:hover:bg-orange-900/70 text-orange-700 dark:text-orange-300 border border-orange-200/80 dark:border-orange-800/60 transition shadow-2xs shrink-0 cursor-pointer">
-                      <svg class="w-2.5 h-2.5 text-orange-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                      title="AI: Cloudflare Workers AI · LLaMA 3.3 70B (Click to cycle)"
+                      aria-label="Cloudflare Workers AI LLaMA 3.3 70B"
+                      class="inline-flex items-center justify-center p-1 rounded-md text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-950/60 transition shrink-0 cursor-pointer">
+                      <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                       </svg>
-                      <span>Workers AI</span>
                     </button>
                   {:else}
                     <button
                       type="button"
                       onclick={cycleAiProvider}
-                      title="Local Fallback: Deterministic Heuristic Engine (Click to cycle provider)"
-                      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition shadow-2xs shrink-0 cursor-pointer">
-                      <svg class="w-2.5 h-2.5 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      title="AI: Local Heuristic Fallback Engine (Click to cycle)"
+                      aria-label="Local Heuristic Fallback Engine"
+                      class="inline-flex items-center justify-center p-1 rounded-md text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition shrink-0 cursor-pointer">
+                      <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                       </svg>
-                      <span>Local Engine</span>
                     </button>
                   {/if}
                 {/if}
@@ -2618,29 +2618,21 @@
                 <button
                   type="button"
                   onclick={cycleIngestAiProvider}
-                  title="Click to toggle Ingestion AI Model"
-                  class="cursor-pointer">
+                  title={ingestAiProvider === 'gemini-2.5-flash' ? 'AI: Google Gemini 2.5 Flash API (Click to cycle)' : ingestAiProvider === 'workers-ai' ? 'AI: Cloudflare Workers AI · LLaMA 3.3 70B (Click to cycle)' : 'AI: Local Heuristic Fallback Engine (Click to cycle)'}
+                  aria-label="Toggle Ingestion AI Provider"
+                  class="inline-flex items-center justify-center p-1 rounded-md hover:bg-warm-100 dark:hover:bg-slate-800 transition cursor-pointer shrink-0">
                   {#if ingestAiProvider === 'gemini-2.5-flash'}
-                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/60 shadow-2xs">
-                      <svg class="w-2.5 h-2.5 text-indigo-600 dark:text-indigo-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M12 2C12 7.52285 7.52285 12 2 12C7.52285 12 12 16.4772 12 22C12 16.4772 16.4772 12 22 12C16.4772 12 12 7.52285 12 2Z"/>
-                      </svg>
-                      <span>Gemini 2.5 Flash</span>
-                    </span>
+                    <svg class="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 2C12 7.52285 7.52285 12 2 12C7.52285 12 12 16.4772 12 22C12 16.4772 16.4772 12 22 12C16.4772 12 12 7.52285 12 2Z"/>
+                    </svg>
                   {:else if ingestAiProvider === 'workers-ai'}
-                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-orange-50 dark:bg-orange-950/70 text-orange-700 dark:text-orange-300 border border-orange-200/80 dark:border-orange-800/60 shadow-2xs">
-                      <svg class="w-2.5 h-2.5 text-orange-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                      </svg>
-                      <span>Workers AI</span>
-                    </span>
+                    <svg class="w-3.5 h-3.5 text-orange-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
                   {:else}
-                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 shadow-2xs">
-                      <svg class="w-2.5 h-2.5 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                      </svg>
-                      <span>Local Engine</span>
-                    </span>
+                    <svg class="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
                   {/if}
                 </button>
 
