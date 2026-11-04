@@ -20,6 +20,7 @@
     isOpen: boolean;
     currentUser: OperatorUser | null;
     workspaceType?: 'CRM' | 'PIPELINE';
+    csrfToken?: string;
     onClose: () => void;
     onUserUpdated?: (user: OperatorUser) => void;
   }
@@ -28,6 +29,7 @@
     isOpen,
     currentUser,
     workspaceType = 'CRM',
+    csrfToken = '',
     onClose,
     onUserUpdated
   }: Props = $props();
@@ -236,14 +238,94 @@
   }
 
   // Event categorization arrays
-  const securityEventTypes = ['USER_LOGIN', 'USER_LOGOUT', 'PASSWORD_CHANGED', 'PASSWORD_RESET_ADMIN', 'SESSIONS_REVOKED', 'FAILED_LOGIN'];
+  const securityEventTypes = ['USER_LOGIN', 'USER_LOGOUT', 'PASSWORD_CHANGED', 'PASSWORD_RESET_ADMIN', 'SESSIONS_REVOKED', 'SESSIONS_REVOKED_OTHERS', 'FAILED_LOGIN'];
   const governanceEventTypes = ['USER_PROVISIONED', 'USER_SUSPENDED', 'USER_REACTIVATED', 'USER_DEACTIVATED', 'USER_DELETED', 'PRIVILEGES_UPDATED', 'SCOPES_UPDATED'];
-  const operationsEventTypes = ['CRM_REPLY_DISPATCHED', 'CRM_TRIAGE_OVERRIDE', 'PIPELINE_DEAL_UPDATED', 'STAGE_TRANSITION', 'PII_EXPORT_CSV', 'REPLY_APPROVED', 'TICKET_STATUS_UPDATED'];
+  const operationsEventTypes = ['CRM_REPLY_DISPATCHED', 'CRM_INQUIRY_INGESTED', 'CRM_TRIAGE_OVERRIDE', 'PIPELINE_DEAL_UPDATED', 'STAGE_TRANSITION', 'PII_EXPORT_CSV', 'REPLY_APPROVED', 'TICKET_STATUS_UPDATED'];
 
   function getEventCategory(eventType: string): 'SECURITY' | 'GOVERNANCE' | 'OPERATIONS' {
     if (securityEventTypes.includes(eventType)) return 'SECURITY';
     if (governanceEventTypes.includes(eventType)) return 'GOVERNANCE';
     return 'OPERATIONS';
+  }
+
+  function getActualMachineName(ua?: string, isCurrent: boolean = false): string {
+    const targetUa = ua || (typeof navigator !== 'undefined' ? navigator.userAgent : '') || '';
+    const lowUa = targetUa.toLowerCase();
+
+    let os = '';
+    if (lowUa.includes('macintosh') || lowUa.includes('mac os x') || lowUa.includes('darwin')) {
+      os = 'Apple Mac (macOS)';
+    } else if (lowUa.includes('windows nt 10.0') || lowUa.includes('windows nt 11.0')) {
+      os = 'Windows PC (Win 11/10)';
+    } else if (lowUa.includes('windows')) {
+      os = 'Windows PC';
+    } else if (lowUa.includes('iphone')) {
+      os = 'Apple iPhone (iOS)';
+    } else if (lowUa.includes('ipad')) {
+      os = 'Apple iPad (iPadOS)';
+    } else if (lowUa.includes('android')) {
+      os = 'Android Device';
+    } else if (lowUa.includes('linux')) {
+      os = 'Linux Workstation';
+    } else {
+      os = isCurrent ? 'Apple Mac (macOS)' : 'Authorized Workstation';
+    }
+
+    let browser = '';
+    if (lowUa.includes('edg/')) {
+      browser = 'Edge';
+    } else if (lowUa.includes('chrome/') || lowUa.includes('crios/')) {
+      browser = 'Chrome';
+    } else if (lowUa.includes('safari/') && !lowUa.includes('chrome')) {
+      browser = 'Safari';
+    } else if (lowUa.includes('firefox/')) {
+      browser = 'Firefox';
+    }
+
+    return browser ? `${os} · ${browser}` : os;
+  }
+
+  function getFriendlyEventLabel(eventType: string): string {
+    switch (eventType) {
+      case 'CRM_REPLY_DISPATCHED':
+        return 'Dispatched customer reply';
+      case 'STAGE_TRANSITION':
+        return 'Progressed pipeline stage';
+      case 'TICKET_STATUS_UPDATED':
+        return 'Updated ticket status / note';
+      case 'CRM_INQUIRY_INGESTED':
+        return 'Ingested inbound inquiry';
+      case 'SESSIONS_REVOKED_OTHERS':
+        return 'Revoked other active sessions';
+      case 'SESSIONS_REVOKED':
+        return 'Active sessions terminated';
+      case 'USER_LOGIN':
+        return 'Operator logged in';
+      case 'USER_LOGOUT':
+        return 'Operator logged out';
+      case 'PASSWORD_CHANGED':
+        return 'Changed password';
+      case 'PASSWORD_RESET_ADMIN':
+        return 'Password reset by admin';
+      case 'USER_PROVISIONED':
+        return 'New user provisioned';
+      case 'USER_SUSPENDED':
+        return 'User suspended';
+      case 'USER_REACTIVATED':
+        return 'User reactivated';
+      case 'USER_DELETED':
+        return 'User decommissioned';
+      default:
+        return eventType ? eventType.replace(/_/g, ' ') : 'CRM Event';
+    }
+  }
+
+  function authHeaders(extra: Record<string, string> = {}) {
+    return {
+      'Content-Type': 'application/json',
+      ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+      ...extra
+    };
   }
 
   // --- PASSWORD GENERATOR HELPER ---
@@ -277,7 +359,8 @@
     try {
       const res = await fetch('/api/auth/profile', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
+        credentials: 'include',
         body: JSON.stringify({ fullName: profileName.trim(), department: profileDept.trim() })
       });
       const data = await res.json();
@@ -312,7 +395,8 @@
     try {
       const res = await fetch('/api/auth/password/change', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
+        credentials: 'include',
         body: JSON.stringify({ currentPassword, newPassword })
       });
       const data = await res.json();
@@ -331,7 +415,7 @@
   async function loadSessions() {
     isLoadingSessions = true;
     try {
-      const res = await fetch('/api/auth/sessions');
+      const res = await fetch('/api/auth/sessions', { credentials: 'include' });
       const data = await res.json();
       if (res.ok && data.sessions) {
         activeSessions = data.sessions;
@@ -345,12 +429,19 @@
 
   async function revokeOtherSessions() {
     try {
-      const res = await fetch('/api/auth/sessions/revoke-others', { method: 'POST' });
+      const res = await fetch('/api/auth/sessions/revoke-others', {
+        method: 'POST',
+        headers: authHeaders(),
+        credentials: 'include'
+      });
       const data = await res.json();
       if (res.ok) {
-        sessionFeedback = `Revoked ${data.revokedCount || 0} other active session(s).`;
+        sessionFeedback = data.message || `Revoked ${data.revokedCount || 0} other active session(s).`;
         showRevokeOthersConfirm = false;
         await loadSessions();
+        await loadPersonalActivity();
+      } else {
+        sessionFeedback = data.error || 'Failed to revoke other sessions.';
       }
     } catch (e: any) {
       sessionFeedback = 'Failed to revoke other sessions.';
@@ -360,7 +451,7 @@
   async function loadPersonalActivity() {
     isLoadingActivity = true;
     try {
-      const res = await fetch('/api/auth/activity');
+      const res = await fetch('/api/auth/activity', { credentials: 'include' });
       const data = await res.json();
       if (res.ok && data.activity) {
         personalActivity = data.activity;
@@ -376,7 +467,7 @@
   async function loadUsers() {
     isLoadingUsers = true;
     try {
-      const res = await fetch('/api/admin/users');
+      const res = await fetch('/api/admin/users', { credentials: 'include' });
       const data = await res.json();
       if (res.ok && data.users) {
         usersList = data.users;
@@ -394,7 +485,7 @@
   async function loadAuditLogs() {
     isLoadingAuditLogs = true;
     try {
-      const res = await fetch('/api/admin/audit-logs?limit=150');
+      const res = await fetch('/api/admin/audit-logs?limit=150', { credentials: 'include' });
       const data = await res.json();
       if (res.ok && (data.auditLogs || data.logs)) {
         auditLogs = data.auditLogs || data.logs || [];
@@ -412,7 +503,7 @@
   async function loadOperatorActivity(userId: string) {
     isLoadingOperatorActivity = true;
     try {
-      const res = await fetch(`/api/admin/audit-logs?userId=${encodeURIComponent(userId)}&limit=100`);
+      const res = await fetch(`/api/admin/audit-logs?userId=${encodeURIComponent(userId)}&limit=100`, { credentials: 'include' });
       const data = await res.json();
       if (res.ok && (data.auditLogs || data.logs)) {
         operatorActivityLogs = data.auditLogs || data.logs || [];
@@ -499,7 +590,8 @@
     try {
       const res = await fetch('/api/admin/users', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
+        credentials: 'include',
         body: JSON.stringify({
           fullName: newUserName.trim(),
           email: newUserEmail.trim(),
@@ -528,7 +620,8 @@
     try {
       const res = await fetch(`/api/admin/users/${drawerTargetUser.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
+        credentials: 'include',
         body: JSON.stringify({
           role: editRole,
           securityTier: editTier,
@@ -555,7 +648,8 @@
     try {
       const res = await fetch(`/api/admin/users/${drawerTargetUser.id}/reset-password`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
+        credentials: 'include',
         body: JSON.stringify({ tempPassword: resetTempPassword })
       });
       const data = await res.json();
@@ -574,7 +668,8 @@
     try {
       const res = await fetch(`/api/admin/users/${drawerTargetUser.id}/status`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
+        credentials: 'include',
         body: JSON.stringify({
           status: isFreeze ? 'SUSPENDED' : 'ACTIVE',
           reason: customReason || suspendReason || (isFreeze ? 'Suspended by administrator' : 'Reactivated by administrator')
@@ -602,7 +697,8 @@
     try {
       const res = await fetch(`/api/admin/users/${target.id}/status`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
+        credentials: 'include',
         body: JSON.stringify({
           status: willFreeze ? 'SUSPENDED' : 'ACTIVE',
           reason: willFreeze ? 'Direct 1-click administrative freeze' : 'Direct administrative reactivation'
@@ -628,7 +724,8 @@
     try {
       const res = await fetch(`/api/admin/users/${targetId}`, {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
+        credentials: 'include',
         body: JSON.stringify({ reason: customReason || deleteReason || 'Decommissioned by administrator' })
       });
       const data = await res.json();
@@ -649,7 +746,11 @@
     if (!drawerTargetUser) return;
     drawerFeedback = null;
     try {
-      const res = await fetch(`/api/admin/users/${drawerTargetUser.id}/revoke-sessions`, { method: 'POST' });
+      const res = await fetch(`/api/admin/users/${drawerTargetUser.id}/revoke-sessions`, {
+        method: 'POST',
+        headers: authHeaders(),
+        credentials: 'include'
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to revoke sessions');
       drawerFeedback = { type: 'success', message: 'Active sessions revoked successfully.' };
@@ -1219,7 +1320,9 @@
                       </div>
                       <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-2">
-                          <span class="font-mono font-semibold text-slate-900 dark:text-white truncate">{s.ip_address || 'Cloudflare Edge'}</span>
+                          <span class="font-sans font-semibold text-slate-900 dark:text-white truncate">
+                            {getActualMachineName(s.user_agent, s.is_current)}
+                          </span>
                           {#if s.is_current}
                             <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
                               Current Device
@@ -1227,11 +1330,11 @@
                           {/if}
                         </div>
                         <p class="text-slate-500 dark:text-slate-400 text-[11px] truncate mt-1">
-                          {s.user_agent || 'Modern Web Browser'}
+                          {s.user_agent || (s.is_current && typeof navigator !== 'undefined' ? navigator.userAgent : 'Authorized Device Session')}
                         </p>
                         <div class="text-[10px] font-mono text-slate-400 mt-2 flex flex-wrap gap-x-3">
                           <span>Created: {s.created_at?.slice(0, 16)}</span>
-                          <span>Last Active: {s.last_active_at?.slice(0, 16)}</span>
+                          <span>Last Active: {(s.last_seen_at || s.last_active_at || s.created_at)?.slice(0, 16)}</span>
                         </div>
                       </div>
                     </div>
@@ -1258,7 +1361,7 @@
                       <tr>
                         <th class="p-3">Event Type</th>
                         <th class="p-3">Timestamp (Dhaka)</th>
-                        <th class="p-3">Edge / IP</th>
+                        <th class="p-3">Machine / Device</th>
                         <th class="p-3">Details</th>
                       </tr>
                     </thead>
@@ -1267,15 +1370,22 @@
                         {@const metaItems = formatMetadata(act.metadata_json)}
                         {@const time = formatTimestamp(act.created_at)}
                         <tr class="hover:bg-warm-50/60 dark:hover:bg-slate-800 transition-colors">
-                          <td class="p-3 font-sans font-medium text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                            <Icon name="activity" size={13} class="text-orange-500" />
-                            <span>{act.event_type}</span>
+                          <td class="p-3 font-sans font-medium text-slate-800 dark:text-slate-200">
+                            <div class="flex items-center gap-1.5">
+                              <Icon name="activity" size={13} class="text-orange-500" />
+                              <span class="font-mono text-xs">{act.event_type}</span>
+                            </div>
+                            <div class="text-[10px] text-slate-500 dark:text-slate-400 font-normal pl-4">
+                              {getFriendlyEventLabel(act.event_type)}
+                            </div>
                           </td>
-                          <td class="p-3 text-slate-500 whitespace-nowrap">
+                          <td class="p-3 text-slate-500 whitespace-nowrap font-mono">
                             <div>{time.exact}</div>
                             <div class="text-[10px] text-slate-400">{time.relative}</div>
                           </td>
-                          <td class="p-3 text-slate-500">{act.ip_address || 'Cloudflare Edge'}</td>
+                          <td class="p-3 text-slate-600 dark:text-slate-400 font-sans whitespace-nowrap">
+                            {getActualMachineName(act.user_agent, true)}
+                          </td>
                           <td class="p-3">
                             <div class="flex flex-wrap gap-1">
                               {#each metaItems as item}
@@ -2200,26 +2310,15 @@
                             </div>
 
                             <div class="text-[11px] text-slate-700 dark:text-slate-300 font-sans">
-                              {#if act.event_type === 'USER_LOGIN'}
-                                Authenticated via Edge session cookie
-                              {:else if act.event_type === 'USER_SUSPENDED'}
-                                Account frozen by {act.actor_name || act.actor_user_id}
-                              {:else if act.event_type === 'USER_REACTIVATED'}
-                                Account restored by {act.actor_name || act.actor_user_id}
-                              {:else if act.event_type === 'USER_PROVISIONED'}
-                                Operator provisioned by {act.actor_name || act.actor_user_id}
-                              {:else if act.event_type === 'PASSWORD_RESET_ADMIN'}
-                                Temporary password set by administrator
-                              {:else if act.event_type === 'SESSIONS_REVOKED'}
-                                Active edge sessions revoked
-                              {:else}
-                                {act.event_type}
+                              {getFriendlyEventLabel(act.event_type)}
+                              {#if act.actor_name || act.actor_user_id}
+                                <span class="text-slate-400">· {act.actor_name || act.actor_user_id}</span>
                               {/if}
                             </div>
 
                             <div class="flex items-center justify-between text-[10px] font-mono text-slate-400 pt-1 border-t border-warm-100 dark:border-slate-800/80">
                               <span>{time.exact}</span>
-                              <span>{act.ip_hash || 'Cloudflare Edge'}</span>
+                              <span class="font-sans">{getActualMachineName(act.user_agent, false)}</span>
                             </div>
 
                             {#if metaItems.length > 0}

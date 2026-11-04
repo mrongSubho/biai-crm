@@ -33,6 +33,41 @@
   let ingestPhone = $state('+8801712345678');
   let ingestChannel = $state<Channel>('WhatsApp');
   let ingestMessage = $state('Assalamualaikum, amader corporate team er jonno AI bootcamp quote lagbe. 25 jon engineer attend korbe.');
+  let ingestTone = $state<TonePreset>('Professional');
+  let ingestDialect = $state<'bn' | 'banglish' | 'en'>('banglish');
+  let ingestCustomSuggestedReply = $state<string>('');
+
+  let ingestGeneratedReplies = $derived.by(() => {
+    if (!ingestMessage.trim()) return null;
+    const extraction = parseIncomingMessage(ingestMessage, ingestSenderName, ingestPhone, ingestChannel);
+    return getTriDialectReplies({
+      senderName: extraction.extracted_name || ingestSenderName || 'Customer',
+      detectedLanguage: extraction.detected_language || 'BANGLISH',
+      programIntent: extraction.program_intent || 'Bootcamp',
+      triageCategory: extraction.triage_category || 'SALES_LEAD',
+      normalizedPhone: extraction.normalized_phone || ingestPhone || null,
+      seats: extraction.estimated_seats || 1,
+      messageContent: ingestMessage
+    }, ingestTone);
+  });
+
+  let ingestActiveReplyText = $derived.by(() => {
+    if (ingestCustomSuggestedReply) return ingestCustomSuggestedReply;
+    if (!ingestGeneratedReplies) return '';
+    if (ingestDialect === 'bn') return ingestGeneratedReplies.bn;
+    if (ingestDialect === 'banglish') return ingestGeneratedReplies.banglish;
+    return ingestGeneratedReplies.en;
+  });
+
+  function setIngestTone(tone: TonePreset) {
+    ingestTone = tone;
+    ingestCustomSuggestedReply = '';
+  }
+
+  function setIngestDialect(dialect: 'bn' | 'banglish' | 'en') {
+    ingestDialect = dialect;
+    ingestCustomSuggestedReply = '';
+  }
 
   // --- AUTHENTICATION & OPERATOR STATE ---
   let currentUser = $state<{
@@ -44,7 +79,7 @@
     security_tier: string;
     scopes: string[];
   } | null>(null);
-  let csrfToken = $state('');
+  let csrfToken = $state(typeof sessionStorage !== 'undefined' ? (sessionStorage.getItem('biai_csrf') || '') : '');
   let authChecking = $state(true);
   let loginEmail = $state('');
   let loginPassword = $state('');
@@ -138,7 +173,11 @@
     try {
       const res = await fetch('/api/auth/me', { credentials: 'include' });
       if (res.ok) {
-        currentUser = await res.json();
+        const meData = await res.json();
+        currentUser = meData;
+        if (meData.csrfToken) {
+          csrfToken = meData.csrfToken;
+        }
         await loadEnquiries();
         await refreshUnreadMessages();
       } else {
@@ -208,6 +247,9 @@
         return;
       }
       csrfToken = data.csrfToken || '';
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem('biai_csrf', csrfToken);
+      }
       currentUser = data.user;
       loginRequiresMfa = false;
       await loadEnquiries();
@@ -226,6 +268,9 @@
         credentials: 'include'
       });
     } catch {}
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem('biai_csrf');
+    }
     currentUser = null;
     csrfToken = '';
     enquiries = [];
@@ -861,8 +906,10 @@
       first_response_at: null,
       message: ingestMessage,
       raw_message: ingestMessage,
-      suggested_reply: extraction.suggested_replies.primary,
-      suggested_reply_alt: extraction.suggested_replies.alternate,
+      suggested_reply: ingestActiveReplyText || extraction.suggested_replies.primary,
+      suggested_reply_alt: ingestGeneratedReplies
+        ? (ingestDialect === 'bn' ? ingestGeneratedReplies.en : ingestGeneratedReplies.bn)
+        : extraction.suggested_replies.alternate,
       reply_status: 'PENDING',
       flags: extraction.urgency === 'CRITICAL' ? ['PR_RISK'] : []
     };
@@ -875,7 +922,10 @@
     try {
       await fetch('/api/v1/enquiries/parse', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
+        },
         credentials: 'include',
         body: JSON.stringify({
           content: ingestMessage,
@@ -2418,8 +2468,8 @@
       aria-modal="true"
       aria-labelledby="ingest-modal-title"
       class="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overscroll-none animate-in fade-in duration-180">
-      <div class="bg-white dark:bg-slate-900 border border-warm-200 dark:border-slate-800 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4 animate-in slide-in-from-bottom-3 duration-200">
-        <div class="flex items-center justify-between border-b border-warm-200 dark:border-slate-800 pb-3">
+      <div class="bg-white dark:bg-slate-900 border border-warm-200 dark:border-slate-800 rounded-2xl w-full max-w-xl max-h-[92vh] flex flex-col p-6 shadow-2xl space-y-4 animate-in slide-in-from-bottom-3 duration-200">
+        <div class="flex items-center justify-between border-b border-warm-200 dark:border-slate-800 pb-3 shrink-0">
           <div class="flex items-center gap-2">
             <span class="w-3 h-3 rounded-full bg-orange-600"></span>
             <h3 id="ingest-modal-title" class="text-sm font-bold text-slate-900 dark:text-white">Ingest Inbound Inquiry / Webhook</h3>
@@ -2432,7 +2482,7 @@
           </button>
         </div>
 
-        <div class="space-y-3 text-xs">
+        <div class="space-y-3.5 text-xs overflow-y-auto pr-1 flex-1">
           <div>
             <label for="ingest-name" class="block text-slate-500 font-medium mb-1">Customer / Sender Name</label>
             <input
@@ -2476,13 +2526,79 @@
             <textarea
               id="ingest-msg"
               bind:value={ingestMessage}
-              rows="4"
+              rows="3"
               class="w-full p-3 rounded-lg border border-warm-200 dark:border-slate-700 bg-warm-50 dark:bg-slate-800 text-slate-900 dark:text-white font-bengali leading-relaxed focus:outline-none focus:ring-1 focus:ring-orange-600"
               placeholder="Paste raw customer message..."></textarea>
           </div>
+
+          <!-- AI Suggested Reply Preview with 4 Tones & 3 Dialects -->
+          <div class="p-3 rounded-xl border border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-950/60 space-y-2.5">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <!-- Left: 4 Message Tone Presets -->
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Tone:</span>
+                <div class="inline-flex rounded-md bg-warm-200/70 dark:bg-slate-800 p-0.5 text-[10px]">
+                  {#each ['Professional', 'Friendly', 'Direct', 'Executive'] as t}
+                    <button
+                      type="button"
+                      onclick={() => setIngestTone(t as TonePreset)}
+                      class={`px-2 py-0.5 rounded transition font-medium ${
+                        ingestTone === t
+                          ? 'bg-orange-600 text-white shadow-xs font-semibold'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}>
+                      {t}
+                    </button>
+                  {/each}
+                </div>
+              </div>
+
+              <!-- Right: 3 Dialect Switchers (বাংলা | Banglish | EN) -->
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Dialect:</span>
+                <div class="inline-flex rounded-md bg-warm-200/70 dark:bg-slate-800 p-0.5 font-mono text-[10px] shrink-0">
+                  <button
+                    type="button"
+                    onclick={() => setIngestDialect('bn')}
+                    class={`px-2 py-0.5 rounded transition ${ingestDialect === 'bn' ? 'bg-orange-600 text-white font-bold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+                    বাংলা
+                  </button>
+                  <button
+                    type="button"
+                    onclick={() => setIngestDialect('banglish')}
+                    class={`px-2 py-0.5 rounded transition ${ingestDialect === 'banglish' ? 'bg-orange-600 text-white font-bold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+                    Banglish
+                  </button>
+                  <button
+                    type="button"
+                    onclick={() => setIngestDialect('en')}
+                    class={`px-2 py-0.5 rounded transition ${ingestDialect === 'en' ? 'bg-orange-600 text-white font-bold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+                    EN
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label for="ingest-reply" class="text-slate-600 dark:text-slate-300 font-semibold text-[11px] flex items-center gap-1">
+                  <span>Suggested Outbound Reply</span>
+                  <span class="text-[9.5px] font-mono text-orange-600 dark:text-orange-400">({ingestTone} · {ingestDialect === 'bn' ? 'বাংলা' : ingestDialect === 'banglish' ? 'Banglish' : 'EN'})</span>
+                </label>
+                <span class="text-[10px] text-slate-400">Auto-generated preview</span>
+              </div>
+              <textarea
+                id="ingest-reply"
+                value={ingestActiveReplyText}
+                oninput={(e) => ingestCustomSuggestedReply = (e.target as HTMLTextAreaElement).value}
+                rows="3"
+                class="w-full p-2.5 rounded-lg border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-bengali text-xs leading-relaxed focus:outline-none focus:ring-1 focus:ring-orange-600"
+                placeholder="Suggested outbound reply will appear here..."></textarea>
+            </div>
+          </div>
         </div>
 
-        <div class="flex items-center justify-between pt-2 border-t border-warm-200 dark:border-slate-800">
+        <div class="flex items-center justify-between pt-2 border-t border-warm-200 dark:border-slate-800 shrink-0">
           <div class="flex items-center gap-1.5 text-[11px] text-slate-400">
             <span>Deterministic Triage Engine</span>
             <span>·</span>
@@ -2513,6 +2629,7 @@
   <AccountControlModal
     isOpen={showAccountModal}
     currentUser={currentUser}
+    csrfToken={csrfToken}
     workspaceType="CRM"
     onClose={() => showAccountModal = false}
     onUserUpdated={(u) => { if (currentUser) currentUser = { ...currentUser, ...u }; }}

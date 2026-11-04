@@ -8,7 +8,7 @@ import {
   requireReauth,
   type AuthenticatedUser
 } from './auth.js';
-import { AuthService } from './auth_service.js';
+import { AuthService, logAuthEvent } from './auth_service.js';
 import { MessagingService } from './messaging_service.js';
 import { CrmRepository } from './db/repository.js';
 import {
@@ -18,7 +18,7 @@ import {
   ParseMessageSchema,
   EnquiryQuerySchema
 } from './validation.js';
-import { sha256 } from './crypto.js';
+import { sha256, generateRandomToken } from './crypto.js';
 import { getMissingProductionConfig } from './config.js';
 import { retryQueuedCrmDeliveries } from './delivery_retry.js';
 
@@ -535,6 +535,18 @@ app.post('/api/v1/enquiries/parse', async (c) => {
     const actor = c.get('actor');
     const result = await CrmRepository.ingestMessage(c.env?.DB, { content, senderRaw, phoneRaw, channel }, actor, c.env);
 
+    await logAuthEvent(c.env?.DB, {
+      actorUserId: actor?.id || 'usr_admin_1',
+      workspaceId: actor?.workspace_id || 'ws_biai_main',
+      eventType: 'CRM_INQUIRY_INGESTED',
+      outcome: 'SUCCESS',
+      metadata: {
+        sender: senderRaw || 'Direct Customer',
+        channel: channel || 'WhatsApp',
+        enquiryId: result.record?.id
+      }
+    });
+
     return c.json({
       success: true,
       data: result.extraction,
@@ -590,6 +602,19 @@ app.post('/api/v1/enquiries/:id/stage', requireScope('CRM_TRIAGE'), async (c) =>
 
   try {
     const result = await CrmRepository.transitionStage(c.env?.DB, id, newStage, actor, isProduction);
+
+    await logAuthEvent(c.env?.DB, {
+      actorUserId: actor?.id || 'usr_admin_1',
+      workspaceId: actor?.workspace_id || 'ws_biai_main',
+      eventType: 'STAGE_TRANSITION',
+      outcome: 'SUCCESS',
+      metadata: {
+        enquiryId: id,
+        newStage,
+        senderName: result.record?.sender_name
+      }
+    });
+
     return c.json({ success: true, data: result.record, audit: result.audit });
   } catch (err: any) {
     return c.json({ error: err.message || 'Stage transition failed', code: err.code }, err.status || 400);
@@ -612,6 +637,15 @@ app.post('/api/v1/enquiries/:id/transition', requireScope('CRM_TRIAGE'), async (
       'Resolved': 'RESOLVED'
     };
     const result = await CrmRepository.transitionTicketStatus(c.env?.DB, id, statusMap[newStage] || 'ESCALATED', 'Updated via transition', actor, isProduction);
+
+    await logAuthEvent(c.env?.DB, {
+      actorUserId: actor?.id || 'usr_admin_1',
+      workspaceId: actor?.workspace_id || 'ws_biai_main',
+      eventType: 'TICKET_STATUS_UPDATED',
+      outcome: 'SUCCESS',
+      metadata: { enquiryId: id, newStatus: statusMap[newStage] || 'ESCALATED' }
+    });
+
     return c.json({ success: true, data: result.record, audit: result.audit });
   }
 
@@ -622,6 +656,15 @@ app.post('/api/v1/enquiries/:id/transition', requireScope('CRM_TRIAGE'), async (
 
   try {
     const result = await CrmRepository.transitionStage(c.env?.DB, id, stageValidation.data.newStage, actor, isProduction);
+
+    await logAuthEvent(c.env?.DB, {
+      actorUserId: actor?.id || 'usr_admin_1',
+      workspaceId: actor?.workspace_id || 'ws_biai_main',
+      eventType: 'STAGE_TRANSITION',
+      outcome: 'SUCCESS',
+      metadata: { enquiryId: id, newStage: stageValidation.data.newStage }
+    });
+
     return c.json({ success: true, data: result.record, audit: result.audit });
   } catch (err: any) {
     return c.json({ error: err.message || 'Transition failed', code: err.code }, err.status || 400);
@@ -644,6 +687,19 @@ app.post('/api/v1/enquiries/:id/status', requireRole(['PLATFORM_OWNER', 'OPERATI
 
   try {
     const result = await CrmRepository.transitionTicketStatus(c.env?.DB, id, newStatus, notes, actor, isProduction);
+
+    await logAuthEvent(c.env?.DB, {
+      actorUserId: actor?.id || 'usr_admin_1',
+      workspaceId: actor?.workspace_id || 'ws_biai_main',
+      eventType: 'TICKET_STATUS_UPDATED',
+      outcome: 'SUCCESS',
+      metadata: {
+        enquiryId: id,
+        newStatus,
+        notes: notes ? notes.slice(0, 50) : undefined
+      }
+    });
+
     return c.json({ success: true, data: result.record, audit: result.audit });
   } catch (err: any) {
     return c.json({ error: err.message || 'Ticket status update failed', code: err.code }, err.status || 400);
@@ -665,6 +721,19 @@ app.post('/api/v1/enquiries/:id/reply', requireScope('CRM_REPLY_DISPATCH'), asyn
 
   try {
     const result = await CrmRepository.recordOutboundReply(c.env?.DB, id, replyText, channel, actor, c.env);
+
+    await logAuthEvent(c.env?.DB, {
+      actorUserId: actor?.id || 'usr_admin_1',
+      workspaceId: actor?.workspace_id || 'ws_biai_main',
+      eventType: 'CRM_REPLY_DISPATCHED',
+      outcome: 'SUCCESS',
+      metadata: {
+        enquiryId: id,
+        channel: channel || 'WhatsApp',
+        replyPreview: replyText.slice(0, 60)
+      }
+    });
+
     return c.json({ success: true, data: result.record, audit: result.audit, delivery: result.delivery });
   } catch (err: any) {
     return c.json({
