@@ -8,6 +8,8 @@
   import AccountControlModal from '../lib/ui/AccountControlModal.svelte';
   import MessagingCenterModal from '../lib/ui/MessagingCenterModal.svelte';
   import Icon from '../lib/ui/Icon.svelte';
+  import { detectDialect } from '../lib/engine/dialect';
+  import { generateSuggestedReplies } from '../lib/engine/replies';
   import type { ExtractionResult, PipelineStage, Channel } from '../lib/types/crm';
 
   // --- THEME & VIEWPORT STATE ---
@@ -64,6 +66,55 @@
   // Inspector Action State
   let editableReply = $state('');
   let isSendingReply = $state(false);
+
+  // --- OMNICHANNEL CONVERSATION STATE ---
+  export interface ConversationItem {
+    id: string;
+    enquiryId?: number;
+    direction: 'INBOUND' | 'OUTBOUND' | 'INTERNAL_NOTE';
+    channel: Channel;
+    senderName: string;
+    content: string;
+    timestamp: string;
+    language?: string;
+    languageConfidence?: number;
+    deliveryStatus?: string;
+    isSimulated?: boolean;
+  }
+
+  let threadMessagesMap = $state<Record<string, ConversationItem[]>>({});
+  let chatScrollContainer = $state<HTMLDivElement | null>(null);
+  let showSimulateModal = $state(false);
+  let simulateInputText = $state('');
+  let simulateChannel = $state<Channel>('WhatsApp');
+  let lastSyncedId = $state<number | null>(null);
+
+  const simulationPresets = [
+    {
+      title: 'bKash TrxID (Payment Confirmation)',
+      badge: 'Payment Sent',
+      text: 'Vai ami 3,500 BDT bKash e send korechi. TrxID: 9L4K2918X. Please confirm amar seat.',
+      expectedIntent: 'Payment Verification'
+    },
+    {
+      title: 'Weekend Schedule & Timing',
+      badge: 'Logistics',
+      text: 'Class gulo ki shudhu weekend e hobe naki weekday teo thakbe? Timing ta koto?',
+      expectedIntent: 'Schedule Inquiry'
+    },
+    {
+      title: 'Corporate Bulk Discount (+10 Seats)',
+      badge: 'Corporate Expansion',
+      text: 'Amader company theke aro 10 jon software engineer add korte chai. Group discount kibhabe pabo?',
+      expectedIntent: 'Corporate Discount'
+    },
+    {
+      title: 'Course Certificate & Syllabus PDF',
+      badge: 'Curriculum',
+      text: 'Course certificate ta ki industry verified? Apnader detailed syllabus brochure ta ektu pathaben please.',
+      expectedIntent: 'Curriculum & Certification'
+    }
+  ];
 
   async function checkAuth() {
     authChecking = true;
@@ -343,10 +394,111 @@
 
   // Sync draft reply whenever selected enquiry changes
   $effect(() => {
-    if (selectedEnquiry) {
+    if (selectedEnquiry && selectedEnquiry.id !== lastSyncedId) {
+      lastSyncedId = selectedEnquiry.id;
       editableReply = selectedEnquiry.suggested_reply || '';
+      scrollChatToBottom(false);
     }
   });
+
+  // --- OMNICHANNEL CONVERSATION THREAD ENGINE ---
+  function getThreadKey(enquiry: any): string {
+    if (!enquiry) return '';
+    return enquiry.normalized_phone || enquiry.phone || enquiry.contact_id || `enquiry_${enquiry.id}`;
+  }
+
+  function getThreadMessages(enquiry: any): ConversationItem[] {
+    if (!enquiry) return [];
+    const key = getThreadKey(enquiry);
+
+    // 1. Gather all base inbound enquiries for this contact across dataset
+    const matching = enquiries.filter(e => {
+      const eKey = getThreadKey(e);
+      return eKey && eKey === key;
+    });
+
+    matching.sort((a, b) => new Date(a.received_at).getTime() - new Date(b.received_at).getTime());
+
+    const baseItems: ConversationItem[] = [];
+
+    for (const item of matching) {
+      const isNote = item.channel === 'Phone call note';
+      baseItems.push({
+        id: `in_${item.id}`,
+        enquiryId: item.id,
+        direction: isNote ? 'INTERNAL_NOTE' : 'INBOUND',
+        channel: item.channel,
+        senderName: item.sender_name || 'Direct Customer',
+        content: item.message || item.raw_message || '',
+        timestamp: item.received_at,
+        language: item.detected_language || item.language,
+        languageConfidence: item.language_confidence,
+        deliveryStatus: 'RECEIVED'
+      });
+
+      if (item.outbound_reply && item.first_response_at) {
+        baseItems.push({
+          id: `out_base_${item.id}`,
+          enquiryId: item.id,
+          direction: 'OUTBOUND',
+          channel: item.channel,
+          senderName: `${currentUser?.full_name || 'BIAI Admissions'} (Admissions)`,
+          content: item.outbound_reply,
+          timestamp: item.first_response_at,
+          deliveryStatus: 'SENT'
+        });
+      }
+    }
+
+    // 2. Merge session turns (outbounds approved or simulated follow-ups)
+    const sessionItems = threadMessagesMap[key] || [];
+    const existingIds = new Set(baseItems.map(m => m.id));
+    const merged = [...baseItems];
+    for (const s of sessionItems) {
+      if (!existingIds.has(s.id)) {
+        merged.push(s);
+      }
+    }
+
+    merged.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    return merged;
+  }
+
+  let activeThreadMessages = $derived(selectedEnquiry ? getThreadMessages(selectedEnquiry) : []);
+
+  let aiThreadDigest = $derived.by(() => {
+    if (!selectedEnquiry) return null;
+    const msgs = activeThreadMessages;
+    const inboundTurns = msgs.filter(m => m.direction === 'INBOUND');
+    const outboundTurns = msgs.filter(m => m.direction === 'OUTBOUND');
+
+    if (msgs.length <= 1) {
+      return {
+        isMultiTurn: false,
+        summary: 'Single inbound turn received',
+        detail: 'Awaiting primary outbound response'
+      };
+    }
+
+    return {
+      isMultiTurn: true,
+      summary: `${inboundTurns.length} Inbound • ${outboundTurns.length} Outbound (${msgs.length} Total Messages)`,
+      detail: outboundTurns.length > 0
+        ? 'Active two-way dialogue established. Customer engaged.'
+        : 'Repeat inquiries detected before staff reply. High response urgency!'
+    };
+  });
+
+  function scrollChatToBottom(smooth = true) {
+    setTimeout(() => {
+      if (chatScrollContainer) {
+        chatScrollContainer.scrollTo({
+          top: chatScrollContainer.scrollHeight,
+          behavior: smooth ? 'smooth' : 'auto'
+        });
+      }
+    }, 50);
+  }
 
   function switchViewMode(mode: 'inbox' | 'board') {
     viewMode = mode;
@@ -374,6 +526,7 @@
         soundFx.playWarningPing();
       }
     }
+    scrollChatToBottom(false);
   }
 
   function selectLeadOnBoard(id: number, stage: PipelineStage) {
@@ -399,12 +552,15 @@
   // --- ACTIONS ---
   async function approveReply(id: number) {
     const textToSend = editableReply;
+    if (!textToSend.trim()) return;
     isSendingReply = true;
+    const nowIso = new Date().toISOString();
+
     enquiries = enquiries.map(e => {
       if (e.id === id) {
         return {
           ...e,
-          first_response_at: new Date().toISOString(),
+          first_response_at: nowIso,
           pipeline_stage: 'Contacted' as PipelineStage,
           reply_status: 'SENT',
           outbound_reply: textToSend
@@ -412,8 +568,25 @@
       }
       return e;
     });
+
+    if (selectedEnquiry) {
+      const key = getThreadKey(selectedEnquiry);
+      const newMsg: ConversationItem = {
+        id: `out_${Date.now()}`,
+        enquiryId: id,
+        direction: 'OUTBOUND',
+        channel: selectedEnquiry.channel,
+        senderName: `${currentUser?.full_name || 'BIAI Admissions'} (Admissions)`,
+        content: textToSend,
+        timestamp: nowIso,
+        deliveryStatus: 'SENT'
+      };
+      threadMessagesMap[key] = [...(threadMessagesMap[key] || []), newMsg];
+    }
+
     soundFx.playActionSuccess();
     showFeedback('Outbound response approved & sent. SLA timer met.');
+    scrollChatToBottom(true);
 
     // Persist to D1 in background
     fetch(`/api/v1/enquiries/${id}/reply`, {
@@ -424,6 +597,70 @@
     })
     .catch(e => console.log('Local action cached', e))
     .finally(() => { isSendingReply = false; });
+  }
+
+  function executeSimulation(chosenText?: string) {
+    if (!selectedEnquiry) return;
+    const text = (chosenText || simulateInputText).trim();
+    if (!text) return;
+
+    const key = getThreadKey(selectedEnquiry);
+    const nowIso = new Date().toISOString();
+
+    const newInboundMsg: ConversationItem = {
+      id: `sim_${Date.now()}`,
+      enquiryId: selectedEnquiry.id,
+      direction: 'INBOUND',
+      channel: simulateChannel || selectedEnquiry.channel,
+      senderName: selectedEnquiry.sender_name || 'Customer',
+      content: text,
+      timestamp: nowIso,
+      language: detectDialect(text).language,
+      languageConfidence: 0.96,
+      deliveryStatus: 'RECEIVED',
+      isSimulated: true
+    };
+
+    threadMessagesMap[key] = [...(threadMessagesMap[key] || []), newInboundMsg];
+
+    // Contextual reply generator for simulation
+    const lower = text.toLowerCase();
+    const firstName = (selectedEnquiry.sender_name || 'Vai').split(' ')[0];
+
+    if (lower.includes('trxid') || lower.includes('bkash') || lower.includes('send korechi') || lower.includes('3,500') || lower.includes('paid')) {
+      const trxMatch = text.match(/trxid:?\s*([a-z0-9]+)/i);
+      const trxId = trxMatch ? trxMatch[1].toUpperCase() : '9L4K2918X';
+      editableReply = `Walaikum Assalam ${firstName} vai! Apnar bKash payment TrxID: ${trxId} amra receive korechi ebong finance team ke verify korte bolechi. Verification complete houa matroi apnar confirmed seat admission voucher ebong Discord onboarding link pathiye deya hobe. Welcome to Bangladesh AI Institute! 🎉`;
+      
+      enquiries = enquiries.map(e => e.id === selectedEnquiry.id ? { ...e, pipeline_stage: 'Interested' as PipelineStage } : e);
+      showFeedback(`Payment TrxID detected! Stage moved to Interested & verification reply generated.`);
+    } else if (lower.includes('10 jon') || lower.includes('group discount') || lower.includes('corporate') || lower.includes('company')) {
+      editableReply = `Assalamualaikum ${firstName} vai! Excellent news. Amader 10+ batch corporate enrollment er jonno 15% institutional discount offer ache ebong customized project mentoring provide kora hoy. Apnar company name ebong HR/Finance email ta ki deya jabe? Amra direct official customized quotation invoice pathiye dicchi.`;
+      showFeedback(`Corporate team expansion detected! Enterprise reply drafted.`);
+    } else if (lower.includes('weekend') || lower.includes('timing') || lower.includes('schedule')) {
+      editableReply = `Walaikum Assalam ${firstName} vai! Amader 3-day AI Bootcamp schedule shudhu Friday & Saturday shondha 7:00 PM theke 10:00 PM porjonto interactive live online Zoom session e hoy. Shob class er full HD recording ebong GitHub source code repository shathe shathe lifetime access hishabe paben.`;
+      showFeedback(`Schedule inquiry detected! Timing reply drafted.`);
+    } else if (lower.includes('certificate') || lower.includes('syllabus') || lower.includes('brochure')) {
+      editableReply = `Assalamualaikum ${firstName} vai! Ji oboshoy, course sheshe industry-verified digital verifiable credential certificate paben ja LinkedIn e directly add kora jay. Amader comprehensive course syllabus brochure PDF ta ekhane attach kore dicchi: https://biai.com.bd/curriculum/bootcamp-latest.pdf`;
+      showFeedback(`Syllabus inquiry detected! Curriculum brochure reply drafted.`);
+    } else {
+      const replyPair = generateSuggestedReplies({
+        senderName: selectedEnquiry.sender_name || 'Customer',
+        detectedLanguage: detectDialect(text).language,
+        programIntent: selectedEnquiry.program_intent || 'Bootcamp',
+        triageCategory: selectedEnquiry.triage_category || 'SALES_LEAD',
+        normalizedPhone: selectedEnquiry.normalized_phone,
+        seats: selectedEnquiry.seats || 1,
+        messageContent: text
+      });
+      editableReply = replyPair.primary;
+      showFeedback(`AI context updated based on customer follow-up.`);
+    }
+
+    soundFx.playNewMessage();
+    showSimulateModal = false;
+    simulateInputText = '';
+    scrollChatToBottom(true);
   }
 
   async function transitionStage(id: number, stage: PipelineStage) {
@@ -1559,25 +1796,130 @@
             </div>
           </div>
 
-          <!-- Original Customer Inbound Message (shrink-0 with max-h and scrollable inner content) -->
-          <div class="shrink-0 flex flex-col">
-            <div class="flex items-center justify-between mb-1">
-              <span class="text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                Original Inbound Message
-              </span>
-              <span class="text-[10px] text-slate-400">
-                Language: <strong class="text-slate-700 dark:text-slate-300">{(selectedEnquiry.detected_language || selectedEnquiry.language) === 'BN_SCRIPT' ? 'বাংলা' : (selectedEnquiry.detected_language || selectedEnquiry.language || 'Banglish')}</strong>
-                ({Math.round((selectedEnquiry.language_confidence || 1) * 100)}%)
-              </span>
+          <!-- Omnichannel Conversation Stream Container (Takes available flex height) -->
+          <div class="flex-1 flex flex-col min-h-0 gap-1.5 overflow-hidden">
+            <!-- Stream Subheader with Turns Summary & Simulate Action -->
+            <div class="flex items-center justify-between shrink-0">
+              <div class="flex items-center gap-1.5">
+                <span class="text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1">
+                  <svg class="w-3.5 h-3.5 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                  </svg>
+                  Conversation Stream
+                </span>
+                <span class="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-warm-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                  {activeThreadMessages.length} {activeThreadMessages.length === 1 ? 'Turn' : 'Turns'}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onclick={() => { showSimulateModal = true; simulateChannel = selectedEnquiry.channel; }}
+                class="text-[10px] font-semibold text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-950/50 hover:bg-orange-100 dark:hover:bg-orange-900/60 border border-orange-200 dark:border-orange-800/80 px-2 py-0.5 rounded-md flex items-center gap-1 transition">
+                <svg class="w-3 h-3 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                <span>+ Simulate Follow-up</span>
+              </button>
             </div>
 
-            <div class="bengali-quote bg-warm-50 dark:bg-slate-950 p-2.5 rounded-lg border-l-4 border-orange-500 border-t border-r border-b border-warm-200 dark:border-slate-800 text-xs text-slate-800 dark:text-slate-100 max-h-24 overflow-y-auto overscroll-contain font-bengali leading-relaxed">
-              "{selectedEnquiry.message || selectedEnquiry.raw_message || ''}"
+            <!-- AI Multi-Turn Thread Digest (Visible when multi-turn) -->
+            {#if aiThreadDigest && aiThreadDigest.isMultiTurn}
+              <div class="shrink-0 bg-orange-50/80 dark:bg-orange-950/40 border border-orange-200/80 dark:border-orange-900/50 rounded-md px-2.5 py-1 text-[10px] flex items-center justify-between text-orange-800 dark:text-orange-200 animate-in fade-in duration-150">
+                <div class="flex items-center gap-1.5 truncate">
+                  <span class="font-bold shrink-0">✨ AI Context:</span>
+                  <span class="truncate">{aiThreadDigest.summary}</span>
+                </div>
+                <span class="text-[9px] text-orange-700 dark:text-orange-300 shrink-0 font-medium hidden sm:inline ml-2">
+                  {aiThreadDigest.detail}
+                </span>
+              </div>
+            {/if}
+
+            <!-- Scrollable Multi-Turn Message Stream -->
+            <div
+              bind:this={chatScrollContainer}
+              class="flex-1 min-h-[140px] max-h-[250px] lg:max-h-[290px] overflow-y-auto overscroll-contain p-2.5 rounded-lg border border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-950/60 space-y-2.5 text-xs">
+              {#if activeThreadMessages.length === 0}
+                <div class="text-center py-6 text-slate-400 text-xs">
+                  No conversation messages recorded yet.
+                </div>
+              {:else}
+                {#each activeThreadMessages as msg (msg.id)}
+                  {#if msg.direction === 'INTERNAL_NOTE'}
+                    <!-- Internal Call Note (Centered memo card) -->
+                    <div class="flex justify-center my-1">
+                      <div class="max-w-[90%] bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800/60 rounded-lg p-2 text-amber-900 dark:text-amber-200 text-[11px] shadow-2xs">
+                        <div class="flex items-center gap-1 font-semibold text-[10px] text-amber-700 dark:text-amber-400 mb-0.5">
+                          <span>📞 Internal Phone Call Note</span>
+                          <span>•</span>
+                          <span class="font-mono text-[9px]">{msg.timestamp.slice(11, 16) || msg.timestamp}</span>
+                        </div>
+                        <div class="italic">
+                          "{msg.content}"
+                        </div>
+                      </div>
+                    </div>
+                  {:else if msg.direction === 'OUTBOUND'}
+                    <!-- Outbound Message Bubble (Right-aligned, Brand Amber/Orange accent) -->
+                    <div class="flex flex-col items-end pl-6">
+                      <div class="max-w-[90%] bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-2xl rounded-tr-xs p-2.5 shadow-xs text-xs space-y-1">
+                        <div class="flex items-center justify-between gap-3 text-[10px] text-orange-100 border-b border-orange-500/50 pb-1">
+                          <span class="font-semibold flex items-center gap-1">
+                            <span>{msg.senderName}</span>
+                          </span>
+                          <span class="font-mono text-[9px] text-orange-200">{msg.timestamp.slice(11, 16) || msg.timestamp}</span>
+                        </div>
+                        <div class="font-bengali leading-relaxed whitespace-pre-line text-[11.5px]">
+                          {msg.content}
+                        </div>
+                        <div class="flex items-center justify-end gap-1 text-[9px] text-orange-200 font-mono pt-0.5">
+                          <span>Sent via {msg.channel}</span>
+                          <span class="text-white font-bold">✓✓</span>
+                        </div>
+                      </div>
+                    </div>
+                  {:else}
+                    <!-- Inbound Customer Message Bubble (Left-aligned) -->
+                    <div class="flex flex-col items-start pr-6">
+                      <div class="max-w-[90%] bg-white dark:bg-slate-900 border border-warm-200 dark:border-slate-800 rounded-2xl rounded-tl-xs p-2.5 shadow-2xs text-xs space-y-1">
+                        <div class="flex items-center justify-between gap-2 text-[10px] text-slate-500 dark:text-slate-400 border-b border-warm-100 dark:border-slate-800/80 pb-1">
+                          <div class="flex items-center gap-1.5 truncate">
+                            <span class="font-bold text-slate-800 dark:text-slate-200 truncate">{msg.senderName}</span>
+                            <span class="text-[9px] px-1.5 py-0.2 rounded font-medium
+                              {msg.channel === 'WhatsApp' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300' :
+                               msg.channel === 'Facebook Messenger' ? 'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300' :
+                               msg.channel === 'Website form' ? 'bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300' :
+                               'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300'}">
+                              {msg.channel}
+                            </span>
+                            {#if msg.isSimulated}
+                              <span class="text-[8.5px] px-1 py-0.2 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 font-bold tracking-tight">
+                                Simulated
+                              </span>
+                            {/if}
+                          </div>
+
+                          <div class="flex items-center gap-1 shrink-0 font-mono text-[9px]">
+                            <span>{msg.language === 'BN_SCRIPT' ? 'বাংলা' : (msg.language || 'Banglish')}</span>
+                            <span>•</span>
+                            <span>{msg.timestamp.slice(11, 16) || msg.timestamp}</span>
+                          </div>
+                        </div>
+
+                        <div class="font-bengali leading-relaxed text-slate-800 dark:text-slate-100 text-[11.5px] whitespace-pre-line">
+                          "{msg.content}"
+                        </div>
+                      </div>
+                    </div>
+                  {/if}
+                {/each}
+              {/if}
             </div>
           </div>
 
-          <!-- AI Dialect-Matched Reply Composer (Takes remaining height, textarea scrolls if needed) -->
-          <div class="flex-1 flex flex-col min-h-0 overflow-hidden gap-1.5">
+          <!-- AI Dialect-Matched Reply Composer (shrink-0 with controlled height) -->
+          <div class="shrink-0 flex flex-col gap-1.5 pt-1">
             <div class="flex items-center justify-between shrink-0">
               <div class="flex items-center gap-2">
                 <span class="text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
@@ -1600,11 +1942,12 @@
 
             <textarea
               bind:value={editableReply}
-              class="w-full flex-1 min-h-0 resize-none overflow-y-auto overscroll-contain text-xs p-2.5 rounded-lg border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-bengali leading-relaxed focus:outline-none focus:ring-1 focus:ring-orange-600"
+              rows="2"
+              class="w-full resize-none overflow-y-auto overscroll-contain text-xs p-2.5 rounded-lg border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-bengali leading-relaxed focus:outline-none focus:ring-1 focus:ring-orange-600 max-h-20"
               placeholder="Draft your reply..."></textarea>
 
             <!-- Reply Actions (Pinned at bottom, shrink-0) -->
-            <div class="flex items-center justify-between shrink-0 pt-1">
+            <div class="flex items-center justify-between shrink-0 pt-0.5">
               <div class="flex items-center gap-2">
                 {#if selectedEnquiry.businessPriority === 'P0'}
                   <button
@@ -1659,6 +2002,124 @@
     </main>
     {/if}
   </div>
+
+  <!-- Simulate Customer Follow-up Modal -->
+  {#if showSimulateModal && selectedEnquiry}
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="simulate-modal-title"
+      class="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overscroll-none animate-in fade-in duration-180">
+      <div class="bg-white dark:bg-slate-900 border border-warm-200 dark:border-slate-800 rounded-2xl w-full max-w-xl p-5 shadow-2xl space-y-4 animate-in slide-in-from-bottom-3 duration-200">
+        
+        <!-- Modal Header -->
+        <div class="flex items-center justify-between border-b border-warm-200 dark:border-slate-800 pb-3">
+          <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-950/80 text-orange-600 flex items-center justify-center shrink-0">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+            </div>
+            <div>
+              <h3 id="simulate-modal-title" class="text-sm font-bold text-slate-900 dark:text-white">
+                Simulate Omnichannel Follow-up
+              </h3>
+              <p class="text-[11px] text-slate-500">
+                Customer: <span class="font-semibold text-slate-700 dark:text-slate-300">{selectedEnquiry.sender_name}</span> ({selectedEnquiry.phone || selectedEnquiry.channel})
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onclick={() => showSimulateModal = false}
+            class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg hover:bg-warm-100 dark:hover:bg-slate-800 transition">
+            <Icon name="x" size={16} />
+          </button>
+        </div>
+
+        <!-- 4 Quick-Pick Scenarios -->
+        <div>
+          <span class="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-2">
+            Instant Test Scenarios (1-Click)
+          </span>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {#each simulationPresets as preset}
+              <button
+                type="button"
+                onclick={() => executeSimulation(preset.text)}
+                class="text-left p-2.5 rounded-lg border border-warm-200 dark:border-slate-800 hover:border-orange-500 dark:hover:border-orange-500 hover:bg-orange-50/50 dark:hover:bg-orange-950/30 transition group flex flex-col justify-between">
+                <div>
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="text-[11px] font-bold text-slate-800 dark:text-slate-200 group-hover:text-orange-600 dark:group-hover:text-orange-400">
+                      {preset.title}
+                    </span>
+                    <span class="text-[9px] font-medium px-1.5 py-0.2 rounded bg-warm-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                      {preset.badge}
+                    </span>
+                  </div>
+                  <p class="text-[11px] font-bengali text-slate-600 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                    "{preset.text}"
+                  </p>
+                </div>
+                <div class="mt-2 text-[10px] text-orange-600 font-semibold flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                  <span>Simulate this message</span>
+                  <span>→</span>
+                </div>
+              </button>
+            {/each}
+          </div>
+        </div>
+
+        <!-- Custom Message Input -->
+        <div class="pt-2 border-t border-warm-100 dark:border-slate-800/80 space-y-2">
+          <div class="flex items-center justify-between">
+            <label for="custom-sim-text" class="text-[11px] font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider">
+              Or Type Custom Follow-up
+            </label>
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] text-slate-500">Channel:</span>
+              <select
+                bind:value={simulateChannel}
+                class="text-xs p-1 rounded border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">
+                <option value="WhatsApp">WhatsApp</option>
+                <option value="Facebook Messenger">Facebook Messenger</option>
+                <option value="Website form">Website form</option>
+                <option value="Facebook comment">Facebook comment</option>
+              </select>
+            </div>
+          </div>
+
+          <textarea
+            id="custom-sim-text"
+            bind:value={simulateInputText}
+            rows="2"
+            placeholder="e.g. Bhai amar enrollment confirmation ta koto shomoy lagbe? (Bangla, Banglish, or English)"
+            class="w-full text-xs p-2.5 rounded-lg border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-bengali focus:outline-none focus:ring-1 focus:ring-orange-600"></textarea>
+        </div>
+
+        <!-- Modal Footer Actions -->
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-warm-200 dark:border-slate-800">
+          <button
+            type="button"
+            onclick={() => showSimulateModal = false}
+            class="text-xs px-3 py-1.5 rounded-lg text-slate-600 hover:bg-warm-100 dark:text-slate-300 dark:hover:bg-slate-800 transition">
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!simulateInputText.trim()}
+            onclick={() => executeSimulation()}
+            class="text-xs font-semibold bg-orange-600 hover:bg-orange-500 text-white px-4 py-1.5 rounded-lg shadow-sm transition disabled:opacity-50 flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+            </svg>
+            <span>Send Follow-up Turn</span>
+          </button>
+        </div>
+
+      </div>
+    </div>
+  {/if}
 
   <!-- Ingest Inbound Message Modal (Bounded Transition & Accessible Dismiss) -->
   {#if showParserModal}

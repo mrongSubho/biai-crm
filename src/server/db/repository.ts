@@ -984,4 +984,81 @@ export class CrmRepository {
       totalSalesLeads
     };
   }
+
+  /**
+   * Fetch full conversation thread messages for an enquiry or customer contact
+   */
+  static async getConversationMessages(db: any, enquiryId: number, actor: AuthenticatedUser) {
+    if (db) {
+      try {
+        const msgId = `msg_${enquiryId}`;
+        const recipient = await db.prepare(`
+          SELECT m.conversation_id, conv.contact_id
+          FROM messages m
+          JOIN conversations conv ON m.conversation_id = conv.id
+          WHERE (m.id = ? OR CAST(SUBSTR(m.id, 5) AS INTEGER) = ?)
+            AND conv.workspace_id = ?
+        `).bind(msgId, enquiryId, actor.workspace_id).first();
+
+        if (recipient?.conversation_id) {
+          const { results } = await db.prepare(`
+            SELECT id, direction, channel, sender_raw as sender_name, content,
+                   received_at as timestamp, detected_language as language, delivery_status
+            FROM messages
+            WHERE conversation_id = ?
+            ORDER BY received_at ASC
+          `).bind(recipient.conversation_id).all();
+
+          if (results && results.length > 0) {
+            return results;
+          }
+        }
+      } catch (e) {
+        console.error('D1 getConversationMessages error:', e);
+      }
+    }
+
+    // In-memory fallback
+    const target = inMemoryRecords.find(r => r.id === enquiryId);
+    if (!target) return [];
+
+    const normPhone = target.normalized_phone || target.phone_normalized || target.phone;
+    const matchedRecords = inMemoryRecords.filter(r => {
+      if (normPhone && (r.normalized_phone === normPhone || r.phone === normPhone)) return true;
+      return r.id === enquiryId;
+    });
+
+    matchedRecords.sort((a, b) => new Date(a.received_at).getTime() - new Date(b.received_at).getTime());
+
+    const messages: any[] = [];
+    for (const rec of matchedRecords) {
+      const isNote = rec.channel === 'Phone call note';
+      messages.push({
+        id: `msg_in_${rec.id}`,
+        enquiry_id: rec.id,
+        direction: isNote ? 'INTERNAL_NOTE' : 'INBOUND',
+        channel: rec.channel,
+        sender_name: rec.sender_name,
+        content: rec.message || rec.raw_message,
+        timestamp: rec.received_at,
+        language: rec.detected_language || rec.language,
+        delivery_status: 'RECEIVED'
+      });
+
+      if (rec.outbound_reply && rec.first_response_at) {
+        messages.push({
+          id: `msg_out_${rec.id}`,
+          enquiry_id: rec.id,
+          direction: 'OUTBOUND',
+          channel: rec.channel,
+          sender_name: 'BIAI Admissions',
+          content: rec.outbound_reply,
+          timestamp: rec.first_response_at,
+          delivery_status: 'SENT'
+        });
+      }
+    }
+
+    return messages;
+  }
 }

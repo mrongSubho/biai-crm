@@ -682,6 +682,14 @@ app.get('/api/v1/knowledge-base', async (c) => {
   return c.json({ success: true, count: kb.length, items: kb });
 });
 
+// 6.2 Fetch Chronological Conversation Thread Messages
+app.get('/api/v1/enquiries/:id/messages', requireScope('CRM_READ'), async (c) => {
+  const id = Number(c.req.param('id'));
+  const actor = c.get('actor');
+  const messages = await CrmRepository.getConversationMessages(c.env?.DB, id, actor);
+  return c.json({ success: true, count: messages.length, messages });
+});
+
 // 7. Executive Weekly AI Digest
 app.get('/api/v1/digest', (c) => {
   const metrics = CrmRepository.getDigestMetrics();

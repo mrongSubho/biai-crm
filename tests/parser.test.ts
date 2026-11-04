@@ -249,3 +249,24 @@ describe('48-Hour SLA Calculation & Escalation State Machine', () => {
     expect(res.isBreached).toBe(false);
   });
 });
+
+describe('Omnichannel Multi-Turn Inbound Follow-ups', () => {
+  it('classifies bKash payment follow-up with TrxID', () => {
+    const text = 'Vai ami 3,500 BDT bKash e send korechi. TrxID: 9L4K2918X. Please confirm amar seat.';
+    const dialect = detectDialect(text);
+    expect(dialect.language).toBe('BANGLISH');
+    expect(text.toLowerCase()).toContain('trxid');
+  });
+
+  it('classifies weekend schedule inquiry', () => {
+    const text = 'Class gulo ki shudhu weekend e hobe naki weekday teo thakbe? Timing ta koto?';
+    const dialect = detectDialect(text);
+    expect(dialect.language).toBe('BANGLISH');
+  });
+
+  it('classifies corporate group addition expansion', () => {
+    const text = 'Amader company theke aro 10 jon software engineer add korte chai. Group discount kibhabe pabo?';
+    const dialect = detectDialect(text);
+    expect(dialect.language).toBe('BANGLISH');
+  });
+});

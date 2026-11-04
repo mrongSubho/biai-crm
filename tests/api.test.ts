@@ -146,6 +146,24 @@ describe('BIAI Task 1 CRM — API Security, D1 Persistence, FTS5 & HMAC Webhooks
     expect(dbOpp.pipeline_stage).toBe('Contacted');
   });
 
+  it('GET /api/v1/enquiries/:id/messages returns chronological conversation thread including inbound and outbound turns', async () => {
+    // Send a reply first on enquiry 1
+    await app.request('/api/v1/enquiries/1/reply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer rep-token' },
+      body: JSON.stringify({ replyText: 'Walaikum Assalam Rafi vai! Our bootcamp fee is 3500 BDT.' })
+    }, env);
+
+    const res = await app.request('/api/v1/enquiries/1/messages', {
+      headers: { 'Authorization': 'Bearer rep-token' }
+    }, env);
+    expect(res.status).toBe(200);
+    const json: any = await res.json();
+    expect(json.success).toBe(true);
+    expect(json.messages.length).toBeGreaterThanOrEqual(1);
+    expect(json.messages.some((m: any) => m.direction === 'OUTBOUND')).toBe(true);
+  });
+
   it('scheduled delivery retry sends a queued outbound message and records provider state', async () => {
     await d1.prepare(`
       INSERT INTO messages (
