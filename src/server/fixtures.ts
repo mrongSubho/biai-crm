@@ -547,3 +547,14 @@ export const sampleEnquiriesFixture = [
     flags: ['CAREERS_HR', 'INTERN_APPLICANT']
   }
 ];
+
+// Attach default ai_provider provenance to sample fixtures
+for (const f of sampleEnquiriesFixture as any[]) {
+  if ([3, 10, 18].includes(f.id)) {
+    f.ai_provider = 'gemini-2.5-flash';
+  } else if ([7, 11, 15, 16].includes(f.id)) {
+    f.ai_provider = 'deterministic';
+  } else {
+    f.ai_provider = 'workers-ai';
+  }
+}

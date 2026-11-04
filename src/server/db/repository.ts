@@ -94,12 +94,14 @@ export class CrmRepository {
               t.queue_category,
               t.ticket_status,
               t.urgency_level,
-              t.resolution_notes
+              t.resolution_notes,
+              ai.model_provider as ai_provider
             FROM messages m
             JOIN conversations conv ON m.conversation_id = conv.id
             JOIN contacts c ON conv.contact_id = c.id
             LEFT JOIN opportunities o ON o.source_message_id = m.id
             LEFT JOIN operational_tickets t ON t.source_message_id = m.id
+            LEFT JOIN ai_extractions ai ON ai.message_id = m.id
             WHERE conv.workspace_id = ? AND m.direction = 'INBOUND'
           `;
           params.push(workspaceId);
@@ -146,7 +148,8 @@ export class CrmRepository {
               sla_formatted: r.first_response_at ? 'SLA Met' : sla.formattedTimeRemaining,
               is_breached: r.first_response_at ? false : sla.isBreached,
               is_at_risk: r.first_response_at ? false : sla.isAtRisk,
-              first_response_at: r.first_response_at
+              first_response_at: r.first_response_at,
+              ai_provider: r.ai_provider || fixture.ai_provider || 'workers-ai'
             };
           });
 
@@ -785,7 +788,10 @@ export class CrmRepository {
       ticket_status: extraction.triage_category === 'CRITICAL_ESCALATION' ? 'ESCALATED' : 'OPEN',
       suggested_reply: extraction.suggested_replies.primary,
       first_response_at: null,
-      reply_status: 'PENDING'
+      reply_status: 'PENDING',
+      ai_provider: aiResult.provider,
+      ai_confidence: aiResult.confidence,
+      fallback_reason: aiResult.fallbackReason || null
     };
 
     inMemoryRecords.unshift(newRecord);
