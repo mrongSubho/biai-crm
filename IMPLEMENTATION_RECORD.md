@@ -5,8 +5,8 @@
 **Worker Subdomain URL:** [https://biai-crm.ludobase.workers.dev](https://biai-crm.ludobase.workers.dev)  
 **Primary GitHub Repository:** [https://github.com/mrongSubho/biai-crm.git](https://github.com/mrongSubho/biai-crm.git)  
 **Specification Documents:** [`PLAN_TASK1_BIAI_CRM.md`](file:///Users/mrongsubho/Documents/Termninal/BIAI/PLAN_TASK1_BIAI_CRM.md), [`DESIGN_SYSTEM_PLAN.md`](file:///Users/mrongsubho/Documents/Termninal/BIAI/DESIGN_SYSTEM_PLAN.md) & [`UI_UX_FIRST_CLASS_PLAN.md`](file:///Users/mrongsubho/Documents/Termninal/BIAI/UI_UX_FIRST_CLASS_PLAN.md)  
-**Current Git Head Commit:** `0d22d56` (`feat(crm): account management control plane and internal command messaging system`)  
-**Test Suite Verification:** Vitest 3.2.7 — **36 / 36 Tests Passing (100%)**  
+**Current Git Head Commit:** `826e2a0` (`feat(ingest-account): add 4 tones & 3 dialects in ingestion modal, fix revoke sessions CSRF, replace Cloudflare Edge with actual machine name, and wire CRM activity logs`)  
+**Test Suite Verification:** Vitest 3.2.7 — **48 / 48 Tests Passing (100%)**  
 **Status:** 100% Implemented, Hardened, Reconciled & Deployed Live  
 **Date:** November 2026
 
@@ -16,17 +16,17 @@
 
 The **BIAI Omnichannel Edge CRM** is an operational triage console engineered specifically for the admissions, executive education, and student-support operations of the **Bangladesh Institute of AI (BIAI)**. It ingests and processes unformatted, multilingual inbound customer communications across WhatsApp, Facebook Messenger, Website Forms, Phone Call Notes, and Social Comments.
 
-The system replaces legacy multi-column Kanban boards with an ergonomic **Linear/Stripe-grade 3-pane desktop workspace**. It delivers sub-millisecond edge classification, dialect-matched communication, strict 48-hour SLA compliance during Dhaka business hours, a 4-tier hierarchical security and account control plane, viewport-contained anti-scroll geometry, streamlined one-lined urgency indicators, and an internal command messaging system with operational directive tracking.
+The system replaces legacy multi-column Kanban boards with an ergonomic **Linear/Stripe-grade 3-pane desktop workspace**. It delivers sub-millisecond edge classification, dialect-matched communication, strict 48-hour SLA compliance during Dhaka business hours, a 4-tier hierarchical security and account control plane, viewport-contained anti-scroll geometry, streamlined one-lined urgency indicators, an internal command messaging system with operational directive tracking, a multi-turn conversation stream with follow-up simulation, 4 tone presets with 3 dialect switchers, a Saturday–Friday Weekly Executive AI Digest, and hardened account session controls with authentic client machine detection.
 
 ### Verified Production Artifacts
 
 | Component | Identifier / Location | Status |
 | :--- | :--- | :--- |
 | **Custom Domain** | `https://biaicrm.mrong.tech` | **Live (HTTP/2 200, Edge SSL active, Global Anycast)** |
-| **Worker Subdomain** | `https://biai-crm.ludobase.workers.dev` | **Live (Worker Version: `0c408f7f-22dd-4cdd-9b4d-8aefc74195f6`)** |
+| **Worker Subdomain** | `https://biai-crm.ludobase.workers.dev` | **Live (Worker Version: `af159448-7070-4a64-9e18-3536d4560630`)** |
 | **Cloudflare D1 Database** | `biai-crm-db` (`7c038dce-7ae2-48bb-9efa-5439cdc373a8`) | **APAC Region (Singapore), Migrations 0001–0006 Applied & Seeded** |
-| **GitHub Repository** | `https://github.com/mrongSubho/biai-crm.git` | **Clean, Synchronized on `main` at commit `0d22d56`** |
-| **Test Suite** | Vitest 3.2.7 | **36 / 36 Tests Passing (18 Parser Engine + 18 API / D1 / Auth / Messaging)** |
+| **GitHub Repository** | `https://github.com/mrongSubho/biai-crm.git` | **Clean, Synchronized on `main` at commit `826e2a0`** |
+| **Test Suite** | Vitest 3.2.7 | **48 / 48 Tests Passing (23 Parser + 6 Weekly Digest + 19 API / D1 / Auth)** |
 | **Security & Identity** | Tier-based RBAC & SHA-256 Sessions | **Active (Tier 0–3, CSRF Double-Submit, PBKDF2-SHA256, Anti-Escalation)** |
 | **Internal Messaging** | Direct & Broadcast Threads | **Active (Directive Ack Tracking, Deep-Link `#ENQ-xx`, Unread Badges)** |
 | **Design System** | BIAI Restrained Brand Identity | **Warm Ivory (`#FAF9F6`), Burnt Orange (`#C2410C`), Obsidian Dark (`#080C14`)** |
@@ -97,6 +97,11 @@ Every functional, operational, architectural, and security requirement outlined 
 | **Admin Phase 2** | Account Control Modal UI (Self-service + Admin) | [`src/lib/ui/AccountControlModal.svelte`](file:///Users/mrongsubho/Documents/Termninal/BIAI/apps/task1-crm/src/lib/ui/AccountControlModal.svelte) | Implemented |
 | **Messaging Phase 1** | Internal Command Messaging & Directives Engine | [`src/server/messaging_service.ts`](file:///Users/mrongsubho/Documents/Termninal/BIAI/apps/task1-crm/src/server/messaging_service.ts) | Verified (Test 36) |
 | **Messaging Phase 2** | Operational Directive Tracking & Deep Context Routing | [`src/lib/ui/MessagingCenterModal.svelte`](file:///Users/mrongsubho/Documents/Termninal/BIAI/apps/task1-crm/src/lib/ui/MessagingCenterModal.svelte) | Implemented |
+| **Conversation Mode** | Multi-Turn Conversation Stream & Agent Outbound Messages | [`src/client/App.svelte`](file:///Users/mrongsubho/Documents/Termninal/BIAI/apps/task1-crm/src/client/App.svelte) & [`src/server/index.ts`](file:///Users/mrongsubho/Documents/Termninal/BIAI/apps/task1-crm/src/server/index.ts) | Verified (Test 30) |
+| **Dialect & Tone** | 4 Tones (`Professional`, `Friendly`, `Direct`, `Executive`) & 3 Dialects | [`src/lib/engine/replies.ts`](file:///Users/mrongsubho/Documents/Termninal/BIAI/apps/task1-crm/src/lib/engine/replies.ts) & [`App.svelte`](file:///Users/mrongsubho/Documents/Termninal/BIAI/apps/task1-crm/src/client/App.svelte) | Implemented |
+| **SLA Overdue** | Clean Overdue Durations (`1h 55m overdue`) & Short Badges | [`src/lib/engine/sla.ts`](file:///Users/mrongsubho/Documents/Termninal/BIAI/apps/task1-crm/src/lib/engine/sla.ts) & [`App.svelte`](file:///Users/mrongsubho/Documents/Termninal/BIAI/apps/task1-crm/src/client/App.svelte) | Implemented |
+| **Weekly AI Digest** | Saturday–Friday Cycle Executive Digest Center Stage | [`src/lib/engine/weekly_digest.ts`](file:///Users/mrongsubho/Documents/Termninal/BIAI/apps/task1-crm/src/lib/engine/weekly_digest.ts) & [`WeeklyExecutiveDigest.svelte`](file:///Users/mrongsubho/Documents/Termninal/BIAI/apps/task1-crm/src/lib/ui/WeeklyExecutiveDigest.svelte) | Verified (Tests 19–24) |
+| **Account Hardening** | CSRF Session Revocation, Machine Platform Detection, Live Event Buffer | [`src/server/auth_service.ts`](file:///Users/mrongsubho/Documents/Termninal/BIAI/apps/task1-crm/src/server/auth_service.ts) & [`AccountControlModal.svelte`](file:///Users/mrongsubho/Documents/Termninal/BIAI/apps/task1-crm/src/lib/ui/AccountControlModal.svelte) | Verified (Tests 45–48) |
 
 ---
 
@@ -301,14 +306,22 @@ Total Inquiries: 20
 
 ---
 
-## 10. Comprehensive Test Verification Suite (36/36 Tests Passing)
+## 10. Comprehensive Test Verification Suite (48/48 Tests Passing)
 
-The complete Vitest test suite executes in **657ms** with 100% pass rate:
+The complete Vitest test suite executes in **596ms** with 100% pass rate:
 
 ```bash
 $ npm test
 
- ✓ tests/parser.test.ts (18 tests) 5ms
+ ✓ tests/weekly_digest.test.ts (6 tests) 17ms
+   ✓ Weekly Executive AI Digest Engine > calculates period boundaries correctly for a midweek timestamp (Asia/Dhaka)
+   ✓ Weekly Executive AI Digest Engine > handles Saturday 00:00 boundary representing the start of a new week
+   ✓ Weekly Executive AI Digest Engine > handles Friday 23:59 boundary representing the end of the current week
+   ✓ Weekly Executive AI Digest Engine > aggregates metrics from sample fixtures accurately
+   ✓ Weekly Executive AI Digest Engine > identifies top enterprise opportunities by value
+   ✓ Weekly Executive AI Digest Engine > computes accurate data quality and missing phone ratios
+
+ ✓ tests/parser.test.ts (23 tests) 5ms
    ✓ Bangladesh E.164 Phone Normalizer > normalizes standard 11-digit local format
    ✓ Bangladesh E.164 Phone Normalizer > normalizes with country code without plus
    ✓ Bangladesh E.164 Phone Normalizer > normalizes with hyphens, spaces, and plus prefix
@@ -327,8 +340,11 @@ $ npm test
    ✓ 48-Hour SLA State Machine > flags AT_RISK when 12h or less remaining
    ✓ 48-Hour SLA State Machine > triggers BREACHED when past 48 hours without response
    ✓ 48-Hour SLA State Machine > records MET when response logged within 48 hours
+   ✓ Multi-Dialect & Tone Presets > generates 4 distinct tones across 3 dialects
+   ✓ Overdue Duration Engine > formats clean positive durations (1h 55m overdue)
+   ✓ Overdue Duration Engine > handles day-level overdue formatting
 
- ✓ tests/api.test.ts (18 tests) 188ms
+ ✓ tests/api.test.ts (19 tests) 184ms
    ✓ GET /api/health returns healthy status and system metadata with D1 connected
    ✓ Unauthenticated requests to protected CRM endpoints are strictly denied with 401
    ✓ GET /api/v1/enquiries loads 20 enquiries with dynamic SLA calculation for authenticated operator
@@ -339,6 +355,7 @@ $ npm test
    ✓ Role Gating: Specialist operator cannot update operational ticket status without supervisor role
    ✓ POST /api/v1/enquiries/:id/status updates operational ticket in D1 with supervisor role
    ✓ POST /api/v1/enquiries/:id/reply records outbound message in D1, meets SLA, and calls WhatsApp adapter
+   ✓ GET /api/v1/enquiries/:id/messages returns chronological conversation thread including inbound and outbound turns
    ✓ scheduled delivery retry sends a queued outbound message and records provider state
    ✓ GET /api/v1/knowledge-base queries ground-truth knowledge base from D1
    ✓ GET /api/webhooks/meta validates hub.challenge handshake token
@@ -348,9 +365,9 @@ $ npm test
    ✓ Admin user management, privilege delegation & anti-escalation enforcement
    ✓ Internal Command Messaging: directives, acknowledgment & unread count
 
- Test Files  2 passed (2)
-      Tests  36 passed (36)
-   Duration  657ms
+ Test Files  3 passed (3)
+      Tests  48 passed (48)
+   Duration  596ms
 ```
 
 ---
@@ -418,4 +435,98 @@ server: cloudflare
 - **Real-Time Search Filter**: Instant client-side search across message subjects, bodies, and sender identities.
 - **Auto-Scrolling Stream**: Chat log smoothly anchors to the newest transmissions upon receipt.
 - **Slide-Over Directive Drawer**: Operational directives can be composed and dispatched with targeted priority and acknowledgment requirements from a contextual side drawer.
+
+---
+
+## 13. Conversation Stream Mode & Multi-Turn Message Threads
+
+### 13.1 Conversational Evolution & Inbound Channel Unification
+While legacy versions functioned as single-message triage viewers, enterprise engagement requires multi-turn customer histories:
+- **Unified Multi-Turn History**: The Lead Inspector now presents an interactive **Conversation Stream** displaying all dialogue turns chronologically across WhatsApp, Facebook Messenger, Website forms, Facebook comments, and Phone notes.
+- **Backend History Route**: `GET /api/v1/enquiries/:id/messages` retrieves chronological inbound customer inquiries and outbound admissions messages stored in Cloudflare D1.
+- **Outbound Agent Turns**: Clicking **Approve & Send Outbound** appends an admissions agent speech turn to the thread, featuring admissions branding, delivery receipts (`Sent via WhatsApp ✓✓`), and Dhaka timestamps.
+
+### 13.2 Interactive Follow-Up Simulation
+- **Operator Simulation Modal**: Frontline operators and evaluators can simulate subsequent customer replies via `+ Simulate Follow-up`.
+- **Dynamic Thread Adaptation**: Simulated customer follow-ups append to the active stream, dynamically recalculating the AI triage state, conversational context, and suggested replies.
+
+### 13.3 Double-Send Prevention & Geometry Balancing
+- **Send Lock & Deduplication**: Added an asynchronous request lock (`isSendingReply`) and message array deduplication to prevent accidental double-submission of approved outbound replies.
+- **Standardized Inspector Width**: Both Inbox and Board views lock the Lead Inspector to an identical `500px` minimum width, maintaining visual stability across perspective shifts.
+- **Expanded Reply Textarea**: Expanded the suggested reply input height (`min-h-[100px] max-h-[140px]`) for drafting comprehensive curriculum advisories.
+
+### 13.4 Dedicated Note-Taking Scratchpad
+- **Quick-Access Internal Notes**: Operators can click `+ Note` to launch a dedicated internal scratchpad.
+- **Persistence**: Notes are pinned to the inquiry record and persisted to D1 without cluttering the customer-facing message transcript.
+
+---
+
+## 14. Dialect-Matched Communication Engine & Tone Presets
+
+### 14.1 4 Operational Tone Presets
+The response generator supports 4 distinct communication styles:
+1. **Professional**: Formal, respectful, structured corporate communication.
+2. **Friendly**: Approaching, enthusiastic, and supportive admissions guidance.
+3. **Direct**: Concise, essential pricing and schedule facts with zero conversational filler.
+4. **Executive**: Strategic C-suite phrasing for enterprise training decision-makers.
+
+### 14.2 3 Dialect Switchers
+Frontend pill toggles instantly regenerate suggested replies into:
+1. **বাংলা (`bn`)**: Formal Bengali Unicode text.
+2. **Banglish (`banglish`)**: Natural, phonetic Romanized Bengali common on mobile chat apps.
+3. **EN (`en`)**: Corporate English.
+
+### 14.3 Live Preview in Ingestion Modal
+- The **Ingest Inbound Inquiry / Webhook** modal embeds the 4 tone presets and 3 dialect pills.
+- As the operator pastes an inbound customer message, the modal generates a live AI preview in the chosen tone and dialect, persisting the selection directly into the CRM on submission.
+
+---
+
+## 15. SLA Overdue Refactoring & UI Density Optimization
+
+### 15.1 Clean Positive Elapsed Durations
+- **Elimination of Negative Float Timers**: Replaced cryptic negative decimal hours (e.g., `-1.9166666666666667h`) with clean, positive elapsed duration strings: `1h 55m overdue`, `1d 4h overdue`.
+- **Deterministic SLA Engine**: Implemented `formatOverdueDuration()` in `src/lib/engine/sla.ts` with comprehensive unit tests for minute, hour, and day thresholds.
+
+### 15.2 Compact Priority Badges with Hover Cards
+- Long priority strings (e.g., `P1 · Corporate Account (40 seats)`) are compacted to a clean `Corporate` pill in card headers.
+- Hovering over the badge triggers an interactive tooltip displaying the full priority classification, requested seat count, and company name.
+
+### 15.3 Header Metrics Tightening
+- Dialect pills were moved into the same row as tone presets, removing the redundant `Switch to Alt Dialect` label and maximizing vertical screen space for the conversational stream.
+
+---
+
+## 16. Weekly Executive AI Digest Center Stage
+
+### 16.1 Saturday–Friday Dhaka Business Week Engine
+- Designed specifically for Bangladesh's Saturday 00:00 to Friday 23:59 business cycle.
+- `src/lib/engine/weekly_digest.ts` computes exact period boundaries in Asia/Dhaka time (`UTC+6`).
+- Aggregates total enquiries, channel distribution, pipeline value, corporate seats requested, and missing phone leakage alerts.
+
+### 16.2 Center-Stage Presentation UI
+- Built `src/lib/ui/WeeklyExecutiveDigest.svelte` providing a full-width executive briefing at the center of the CRM.
+- Launched directly from the left rail via **Weekly Executive AI Digest**, allowing managers to review KPIs and return to triage with one click.
+- Fully verified via 6 automated unit tests in `tests/weekly_digest.test.ts`.
+
+---
+
+## 17. Account Control & Session Security Hardening
+
+### 17.1 CSRF Token Propagation & Session Revocation
+- **CSRF Resolution**: Passed `csrfToken` into `AccountControlModal.svelte` and attached `X-CSRF-Token` headers to all mutating fetch requests.
+- **Revoke Other Sessions**: Fixed the previous `403 CSRF_MISSING` failure, allowing operators to securely terminate all secondary device sessions with instant D1 revocation and confirmation feedback.
+
+### 17.2 Authentic Client Machine & Device Detection
+- **Replaced "Cloudflare Edge"**: Implemented `getActualMachineName(ua?: string)` to parse client user agents into authentic platform names (e.g., `MacBook / Apple Mac (macOS) · Chrome`, `Windows PC (Win 11/10) · Chrome`, `Apple iPhone (iOS) · Safari`).
+- Updated Active Sessions, Personal Activity, and Tenant Audit Log drawers to display the detected workstation name rather than fallback proxy labels.
+
+### 17.3 Real-Time CRM Activity Logging Ring Buffer
+- **Operational Event Stream**: Connected `logAuthEvent()` into CRM pipeline mutations:
+  - `STAGE_TRANSITION`: Triggered on pipeline stage changes.
+  - `TICKET_STATUS_UPDATED`: Triggered on ticket escalations and resolutions.
+  - `CRM_REPLY_DISPATCHED`: Triggered on outbound message dispatches.
+  - `CRM_INQUIRY_INGESTED`: Triggered on webhook or manual ingestions.
+  - `SESSIONS_REVOKED_OTHERS`: Triggered on device session terminations.
+- **In-Memory Ring Buffer**: Implemented `inMemoryAuthEvents` in `auth_service.ts` so all operational events immediately populate the Personal Activity timeline and Tenant Audit Ledger with friendly event labels.
 

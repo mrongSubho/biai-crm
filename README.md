@@ -17,9 +17,11 @@ Deployed on **Cloudflare Workers (Edge V8 Isolates) + Cloudflare D1 (Distributed
    - `SUPPORT_BILLING`: bKash payment verification for unconfirmed transactions (Farzana Rahman `#7`).
    - `CAREERS_HR`: Intern applicant inquiry routing (Arif Hossain `#20`).
    - `SPAM_SECURITY`: Automated crypto phishing quarantine (Earn Crypto Daily `#11`).
-5. **Dialect-Matched Linguistic Reply Drafter:** Accurately classifies Bengali Unicode script, Romanized Banglish phonetics, and English with confidence scoring. Generates tone-matched replies grounded in BIAI's course catalog.
-6. **48-Hour SLA State Machine:** Dynamic countdown tracking with `IN_SLA`, `AT_RISK` ($<12\text{h}$), and `BREACHED` states, accompanied by a test simulation clock for evaluator verification.
-7. **Weekly Executive AI Digest:** Instant executive brief reporting channel breakdown (8 WhatsApp, 4 Messenger, 4 Website, 2 Calls, 2 Comments), 3.17M BDT pipeline value, 175 corporate seats requested, and missing phone leakage alerts.
+5. **Dialect-Matched Linguistic Reply Drafter:** Accurately classifies Bengali Unicode script, Romanized Banglish phonetics, and English with confidence scoring. Generates tone-matched replies grounded in BIAI's course catalog across 4 tones (`Professional`, `Friendly`, `Direct`, `Executive`) and 3 dialects (`বাংলা`, `Banglish`, `EN`).
+6. **Conversation Stream & Multi-Turn History:** End-to-end conversational dialogue rendering customer inquiries and outbound admissions agent turns, complete with follow-up simulation, internal note taking, and double-send protection.
+7. **48-Hour SLA State Machine:** Dynamic countdown tracking with `IN_SLA`, `AT_RISK` ($<12\text{h}$), and clean positive overdue duration timers (`1h 55m overdue`), accompanied by a test simulation clock for evaluator verification.
+8. **Weekly Executive AI Digest Center Stage:** Dedicated Saturday 00:00 to Friday 23:59 business week executive briefing reporting channel breakdown, 3.17M BDT pipeline value, 175 corporate seats requested, and missing phone leakage alerts.
+9. **Account Control & Session Security Plane:** Hierarchical 4-tier RBAC (`TIER_0` to `TIER_3`), CSRF double-submit token protection on session revocation, real-time client machine platform detection (replacing static proxy names), and real-time CRM operational activity logging.
 
 ---
 
@@ -29,11 +31,11 @@ Deployed on **Cloudflare Workers (Edge V8 Isolates) + Cloudflare D1 (Distributed
 # Navigate to the app directory
 cd apps/task1-crm
 
-# Run the automated test suite (18 unit & integration tests)
+# Run the automated test suite (48 unit & integration tests)
 npm test
 
-# Build the production client bundle (<38 KB gzipped)
-npm run build:client
+# Build the production client bundle (<90 KB gzipped)
+npm run build
 
 # Start the local development server
 npm run dev
@@ -97,7 +99,9 @@ apps/task1-crm/
 │       ├── app.css               # Tailwind & custom glassmorphism styles
 │       └── App.svelte            # Main reactive CRM workspace & parser studio
 ├── tests/
-│   └── parser.test.ts            # 18 comprehensive Vitest tests
+│   ├── parser.test.ts            # 23 comprehensive ingestion & triage tests
+│   ├── weekly_digest.test.ts     # 6 business cycle & digest engine tests
+│   └── api.test.ts               # 19 edge API, security, CSRF & D1 tests
 ├── SUBMISSION_NOTE.md            # Half-page required submission note
 └── LOOM_SCRIPT.md                # 4-minute 30-second Loom presentation script
 ```
@@ -108,7 +112,9 @@ apps/task1-crm/
 
 Run `npm test` to verify:
 - **Phone Normalization:** 100% precision on BD local numbers, prefix stripping, and operator detection.
-- **Dialect Classification:** 100% accuracy on sample Bangla, Banglish, and English rows.
+- **Dialect Classification:** 100% accuracy on sample Bangla, Banglish, and English rows across 4 tone presets.
+- **Weekly Executive Digest:** 100% precision on Saturday 00:00 to Friday 23:59 business week period boundaries and financial sums.
 - **Triage Matrix:** Accurate quarantine of Row `#11`, P0 escalation of Row `#16`, billing routing of Row `#7`, and career routing of Row `#20`.
 - **Corporate Extraction:** Correct extraction of 120 seats (Bank in Motijheel), 40 seats (Gazipur Textile), and 15 seats (Garment factory).
-- **SLA Engine:** Verifies `IN_SLA`, `AT_RISK`, `BREACHED`, and `MET` state transitions.
+- **SLA Engine:** Verifies `IN_SLA`, `AT_RISK`, `BREACHED` (positive overdue duration), and `MET` state transitions.
+- **Security & RBAC:** Verifies PBKDF2 authentication, CSRF double-submit token enforcement, anti-escalation tier bounds, and durable outbox delivery.

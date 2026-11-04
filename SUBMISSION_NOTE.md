@@ -1,10 +1,11 @@
 # BIAI AI Intern Assessment — Submission Note (Task 1: BIAI CRM)
 
 **Candidate:** Subho Mrong  
-**Submission Date:** 2 November 2026  
+**Submission Date:** 4 November 2026  
 **Live Demo (Cloudflare Edge):** `https://biaicrm.mrong.tech`  
 **Corporate Pipeline Workspace:** `https://biaileads.mrong.tech`  
 **Code Repository:** `https://github.com/mrongSubho/biai-crm`  
+**Test Suite:** Vitest 3.2.7 — **48 / 48 Tests Passing (100%)**  
 **Loom Walkthrough (4 min 30s):** `[Loom Video URL]`
 
 ---
@@ -21,9 +22,11 @@ I engineered a production-grade, edge-native **Omnichannel CRM & AI Triage Engin
   - `SUPPORT_BILLING`: Routes Row `#7` (Farzana Rahman unconfirmed bKash payment) to finance statement reconciliation.
   - `CAREERS_HR`: Routes Row `#20` (Arif Hossain intern inquiry) to HR careers automation.
   - `SPAM_SECURITY`: Quarantines Row `#11` (crypto phishing) with zero sales rep interruption.
-- **Linguistic Dialect Matching:** Detects Bengali Unicode script, Romanized Banglish phonetics, and English with confidence scores. Generates dialect-matched replies (e.g. natural, polite Banglish for Banglish questions, formal Bengali for Bengali queries).
-- **48-Hour SLA Monitor:** Real-time countdown tracking with automated `IN_SLA`, `AT_RISK` ($<12\text{h}$), and `BREACHED` state machines, including a test simulation clock.
-- **Weekly Executive AI Digest:** Aggregates channel distribution (8 WhatsApp, 4 Messenger, 4 Website, 2 Phone, 2 Comments), active revenue pipeline ($3,170,000$ BDT), corporate seat demand ($175$ seats across 3 enterprises), and data quality leakage alerts.
+- **Conversation Stream & Multi-Turn History:** Full chronological dialogue stream rendering customer inquiries and outbound admissions agent replies, complete with follow-up simulation, double-send prevention, and private operator scratchpads (`+ Note`).
+- **4 Tone Presets & 3 Dialect Switchers:** Dynamically drafts grounded suggested replies across 4 tones (`Professional`, `Friendly`, `Direct`, `Executive`) in 3 dialects (`বাংলা`, `Banglish`, `EN`), embedded directly in both the Lead Inspector and the Ingest Inbound Inquiry Modal.
+- **48-Hour SLA Monitor:** Real-time countdown tracking with automated `IN_SLA`, `AT_RISK` ($<12\text{h}$), and `BREACHED` states (e.g. `1h 55m overdue`), accompanied by interactive evaluation time scrubbing.
+- **Weekly Executive AI Digest Center Stage:** Dedicated Saturday 00:00 to Friday 23:59 Asia/Dhaka business week executive report with channel distribution, active revenue pipeline (৳3,170,000 BDT), corporate seat demand (175 seats), and missing phone data leakage ratios.
+- **Account Control & Session Security Plane:** Hierarchical 4-tier RBAC (`TIER_0` to `TIER_3`), CSRF double-submit token protection on session revocation, real-time client machine platform detection (replacing static proxy names), and real-time CRM operational activity logging.
 
 ---
 
