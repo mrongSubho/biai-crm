@@ -3,7 +3,7 @@ import { parseIncomingMessage } from '../src/lib/engine/parser';
 import { normalizeBangladeshPhone } from '../src/lib/engine/phone';
 import { detectDialect } from '../src/lib/engine/dialect';
 import { analyzeMessageTriage } from '../src/lib/engine/triage';
-import { calculateSlaStatus } from '../src/lib/engine/sla';
+import { calculateSlaStatus, formatDurationHm, formatOverdueDuration } from '../src/lib/engine/sla';
 import { parseWithAiOrFallback } from '../src/server/ai/parser';
 import { getTriDialectReplies } from '../src/lib/engine/replies';
 
@@ -248,6 +248,23 @@ describe('48-Hour SLA Calculation & Escalation State Machine', () => {
     const res = calculateSlaStatus(received, responded, now);
     expect(res.status).toBe('MET');
     expect(res.isBreached).toBe(false);
+  });
+
+  it('formats positive human-readable duration without negative values or unrounded floats', () => {
+    // 1.9166666666666667h = 1h 55m
+    expect(formatDurationHm(-1.9166666666666667)).toBe('1h 55m');
+    expect(formatOverdueDuration(-1.9166666666666667)).toBe('1h 55m overdue');
+
+    // Exact hours
+    expect(formatDurationHm(-2)).toBe('2h');
+    expect(formatOverdueDuration(-2)).toBe('2h overdue');
+
+    // Sub-hour minutes
+    expect(formatDurationHm(-0.75)).toBe('45m');
+    expect(formatOverdueDuration(-0.75)).toBe('45m overdue');
+
+    // Positive remaining values
+    expect(formatDurationHm(2.25)).toBe('2h 15m');
   });
 });
 

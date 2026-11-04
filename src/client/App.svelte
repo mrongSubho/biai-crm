@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { parseIncomingMessage } from '../lib/engine/parser';
-  import { calculateSlaStatus } from '../lib/engine/sla';
+  import { calculateSlaStatus, formatDurationHm, formatOverdueDuration } from '../lib/engine/sla';
   import { soundFx } from '../lib/audio/sound_fx.ts';
   import { urgencyPresentation, type Urgency } from '../lib/ui/status';
   import AccountMenu from '../lib/ui/AccountMenu.svelte';
@@ -307,23 +307,37 @@
       // Business Priority (Orthogonal to time)
       let businessPriority: 'P0' | 'P1' | 'P2' | 'P3' = 'P2';
       let priorityReason = 'Standard Admission Inquiry';
+      let shortBadge = 'Admission';
 
       if (rec.triage_category === 'CRITICAL_ESCALATION' || (rec.flags && rec.flags.includes('PR_RISK'))) {
         businessPriority = 'P0';
         priorityReason = 'Public PR Escalation / Refund Threat';
+        shortBadge = 'PR Threat';
       } else if (rec.triage_category === 'SUPPORT_BILLING') {
         businessPriority = 'P1';
         priorityReason = 'bKash Verification Pending';
+        shortBadge = 'Billing';
       } else if ((rec.seats && rec.seats >= 10) || rec.is_repeat_sender) {
         businessPriority = 'P1';
-        priorityReason = rec.seats && rec.seats >= 10 ? `Corporate Account (${rec.seats} seats)` : '2x Repeat Chaser';
+        if (rec.seats && rec.seats >= 10) {
+          priorityReason = `Corporate Account (${rec.seats} seats)`;
+          shortBadge = 'Corporate';
+        } else {
+          priorityReason = '2x Repeat Chaser';
+          shortBadge = 'Repeat';
+        }
       } else if (rec.triage_category === 'CAREERS_HR') {
         businessPriority = 'P3';
         priorityReason = 'Career Applicant';
+        shortBadge = 'Careers';
       } else if (rec.triage_category === 'SPAM_SECURITY') {
         businessPriority = 'P3';
         priorityReason = 'Automated Quarantine';
+        shortBadge = 'Spam';
       }
+
+      const orgSuffix = (rec as any).organization ? ` • ${(rec as any).organization}` : '';
+      const badgeTooltip = `${businessPriority} · ${priorityReason}${orgSuffix}`;
 
       // SLA State & Normalized Urgency (Calm Semantic Presentation)
       const isMet = !!rec.first_response_at;
@@ -335,19 +349,15 @@
         urgencyLabel = 'SLA Met';
       } else if (sla.isBreached || businessPriority === 'P0') {
         urgency = 'critical';
-        const overdueHours = Math.abs(sla.hoursRemaining);
         urgencyLabel = businessPriority === 'P0'
           ? 'P0 · Critical'
-          : `Overdue ${Math.round(overdueHours)}h`;
+          : formatOverdueDuration(sla.hoursRemaining);
       } else if (sla.hoursRemaining <= 3) {
         urgency = 'at-risk';
-        const mins = Math.max(1, Math.round(sla.hoursRemaining * 60));
-        urgencyLabel = sla.hoursRemaining <= 1
-          ? `At risk · ${mins}m left`
-          : `At risk · ${Math.round(sla.hoursRemaining)}h left`;
+        urgencyLabel = `At risk · ${formatDurationHm(sla.hoursRemaining)} left`;
       } else {
         urgency = 'healthy';
-        urgencyLabel = `In SLA · ${Math.round(sla.hoursRemaining)}h left`;
+        urgencyLabel = `In SLA · ${formatDurationHm(sla.hoursRemaining)} left`;
       }
 
       const meta = urgencyPresentation[urgency];
@@ -356,6 +366,8 @@
         ...rec,
         businessPriority,
         priorityReason,
+        shortBadge,
+        badgeTooltip,
         urgency,
         urgencyLabel,
         railClass: meta.railClass,
@@ -1752,26 +1764,27 @@
         {:else}
         <!-- Inspector Top Header: Contact Identity & Actions (shrink-0, tight 2-row layout using full horizontal space) -->
         <div class="px-3.5 py-2.5 border-b border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-900/60 shrink-0 space-y-1">
-          <!-- Row 1: Name, Priority Badge, Org on Left | Stage, Directive, Close on Right -->
+          <!-- Row 1: Name · Short Badge (Hover reveals full badge and company name) | Stage, Directive, Close on Right -->
           <div class="flex items-center justify-between gap-2">
             <div class="flex items-center gap-1.5 min-w-0">
               <h2 class="text-sm font-bold text-slate-900 dark:text-white truncate">
                 {selectedEnquiry.sender_name}
               </h2>
 
-              <span class={`text-[9px] font-bold px-1.5 py-0.2 rounded uppercase tracking-wider shrink-0 ${
-                selectedEnquiry.businessPriority === 'P0'
-                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                  : 'bg-warm-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-              }`}>
-                {selectedEnquiry.businessPriority} · {selectedEnquiry.priorityReason}
-              </span>
+              <span class="text-slate-400 text-xs select-none">·</span>
 
-              {#if (selectedEnquiry as any).organization}
-                <span class="text-[10.5px] text-slate-500 dark:text-slate-400 truncate hidden sm:inline">
-                  • {(selectedEnquiry as any).organization}
-                </span>
-              {/if}
+              <!-- Short Badge (Tooltip displays full badge reason and organization on hover) -->
+              <span
+                class={`text-[9.5px] font-bold px-2 py-0.5 rounded tracking-wide shrink-0 cursor-help transition ${
+                  selectedEnquiry.businessPriority === 'P0'
+                    ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border border-rose-200 dark:border-rose-900'
+                    : (selectedEnquiry as any).shortBadge === 'Corporate'
+                      ? 'bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-300 border border-purple-200 dark:border-purple-900'
+                      : 'bg-warm-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-warm-200 dark:border-slate-700'
+                }`}
+                title={(selectedEnquiry as any).badgeTooltip || `${selectedEnquiry.businessPriority} · ${selectedEnquiry.priorityReason}${(selectedEnquiry as any).organization ? ` • ${(selectedEnquiry as any).organization}` : ''}`}>
+                {(selectedEnquiry as any).shortBadge || selectedEnquiry.priorityReason}
+              </span>
             </div>
 
             <!-- Right Controls: Stage Select, Directive, Close (X) -->
@@ -1872,17 +1885,17 @@
                 {:else if selectedEnquiry.is_breached}
                   <span class="font-semibold text-rose-700 dark:text-rose-400 flex items-center gap-1.5 text-xs">
                     <span class="w-2 h-2 rounded-full bg-rose-500"></span>
-                    SLA Breached ({selectedEnquiry.sla_hours_remaining}h overdue)
+                    SLA Breached ({formatOverdueDuration(selectedEnquiry.sla_hours_remaining)})
                   </span>
                 {:else if selectedEnquiry.is_at_risk}
                   <span class="font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1.5 text-xs">
                     <span class="w-2 h-2 rounded-full bg-amber-500"></span>
-                    At Risk ({selectedEnquiry.sla_formatted} remaining)
+                    At Risk ({selectedEnquiry.sla_formatted})
                   </span>
                 {:else}
                   <span class="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 text-xs">
                     <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    In SLA ({selectedEnquiry.sla_formatted} remaining)
+                    In SLA ({selectedEnquiry.sla_formatted})
                   </span>
                 {/if}
               </div>

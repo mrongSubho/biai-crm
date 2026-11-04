@@ -47,36 +47,56 @@ export function calculateSlaStatus(
   const hoursRemaining = diffMs / (1000 * 60 * 60);
 
   if (hoursRemaining <= 0) {
-    const overdueHours = Math.abs(Math.round(hoursRemaining));
+    const overdueStr = formatOverdueDuration(hoursRemaining);
     return {
       slaDueAt: slaDueAt.toISOString(),
       status: 'BREACHED',
       hoursRemaining,
       isBreached: true,
       isAtRisk: true,
-      formattedTimeRemaining: `${overdueHours}h Overdue`
+      formattedTimeRemaining: overdueStr
     };
   }
 
   if (hoursRemaining <= 12) {
-    const rounded = Math.round(hoursRemaining);
+    const formatted = formatDurationHm(hoursRemaining);
     return {
       slaDueAt: slaDueAt.toISOString(),
       status: 'AT_RISK',
       hoursRemaining,
       isBreached: false,
       isAtRisk: true,
-      formattedTimeRemaining: `${rounded}h left (At Risk)`
+      formattedTimeRemaining: `${formatted} left`
     };
   }
 
-  const rounded = Math.round(hoursRemaining);
+  const formatted = formatDurationHm(hoursRemaining);
   return {
     slaDueAt: slaDueAt.toISOString(),
     status: 'IN_SLA',
     hoursRemaining,
     isBreached: false,
     isAtRisk: false,
-    formattedTimeRemaining: `${rounded}h left`
+    formattedTimeRemaining: `${formatted} left`
   };
+}
+
+/**
+ * Formats a duration in decimal hours to positive human-readable string:
+ * e.g. 1.9166667 -> "1h 55m", 2.0 -> "2h", 0.75 -> "45m"
+ */
+export function formatDurationHm(hoursDecimal: number): string {
+  const absTotalMinutes = Math.round(Math.abs(hoursDecimal) * 60);
+  const h = Math.floor(absTotalMinutes / 60);
+  const m = absTotalMinutes % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+/**
+ * Formats overdue duration strictly positive: e.g. "1h 55m overdue", "2h overdue", "45m overdue"
+ */
+export function formatOverdueDuration(hoursDecimal: number): string {
+  return `${formatDurationHm(hoursDecimal)} overdue`;
 }
