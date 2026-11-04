@@ -40,7 +40,7 @@
     }
     return {
       'Content-Type': 'application/json',
-      ...(activeToken ? { 'X-CSRF-Token': activeToken } : {}),
+      'X-CSRF-Token': activeToken || '',
       ...extra
     };
   }

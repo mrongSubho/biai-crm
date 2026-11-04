@@ -163,40 +163,7 @@ app.get('/api/auth/me', async (c) => {
   }
 
   // Return the session's active CSRF token directly
-  let csrfToken = actor.csrf_token || '';
-
-  // If session doesn't have an unhashed CSRF token saved yet, check cookie or generate
-  if (!csrfToken) {
-    const cookieHeader = c.req.header('cookie') || '';
-    const match = cookieHeader.match(/(?:^|;\s*)biai_csrf=([^;]+)/);
-    if (match && match[1]) {
-      const candidate = decodeURIComponent(match[1]);
-      const hashedCandidate = await sha256(candidate);
-      if (actor.csrf_token_hash && constantTimeCompare(hashedCandidate, actor.csrf_token_hash)) {
-        csrfToken = candidate;
-      }
-    }
-  }
-
-  // Fallback: If still no token and no valid hash exists, generate and update
-  if (!csrfToken && !actor.csrf_token_hash) {
-    csrfToken = generateRandomToken(32);
-    const newHash = await sha256(csrfToken);
-    actor.csrf_token_hash = newHash;
-    actor.csrf_token = csrfToken;
-
-    if (c.env?.DB && actor.session_id_hash) {
-      try {
-        await c.env.DB.prepare(`
-          UPDATE auth_sessions
-          SET csrf_token_hash = ?, user_agent_hash = ?
-          WHERE id_hash = ?
-        `).bind(newHash, csrfToken, actor.session_id_hash).run();
-      } catch (err) {
-        console.error('Failed to update session csrf_token_hash in D1:', err);
-      }
-    }
-  }
+  const csrfToken = actor.csrf_token || '';
 
   if (csrfToken) {
     const isProd = c.env?.ENVIRONMENT === 'production';

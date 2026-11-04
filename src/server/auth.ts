@@ -42,6 +42,7 @@ export interface AuthenticatedUser {
   session_id_hash?: string;
   csrf_token_hash?: string;
   csrf_token?: string;
+  legacy_ua_hash?: string;
   reauthenticated_at?: string | null;
   is_cookie_session?: boolean;
 }
@@ -283,6 +284,31 @@ export function createAuthMiddleware(appKey: 'CRM' | 'PIPELINE' = 'CRM'): Middle
 
             const scopes = (scopesResult.results || []).map((r: any) => r.permission as string);
 
+            let csrfTokenHash = (sessionRow.csrf_token_hash as string) || '';
+            let rawCsrfToken = (sessionRow.user_agent_hash as string) || '';
+            const legacyUaHash = sessionRow.user_agent_hash as string;
+
+            // Check if rawCsrfToken actually matches csrfTokenHash
+            let isValidRawCsrf = false;
+            if (rawCsrfToken && csrfTokenHash) {
+              const testHash = await hashToken(rawCsrfToken);
+              isValidRawCsrf = constantTimeCompare(testHash, csrfTokenHash);
+            }
+
+            // If legacy session or mismatched token, re-key with a guaranteed valid token
+            if (!isValidRawCsrf) {
+              rawCsrfToken = generateRandomToken(32);
+              csrfTokenHash = await hashToken(rawCsrfToken);
+
+              c.env.DB.prepare(`
+                UPDATE auth_sessions
+                SET csrf_token_hash = ?, user_agent_hash = ?
+                WHERE id_hash = ?
+              `).bind(csrfTokenHash, rawCsrfToken, sessionRow.id_hash).run().catch((err: any) => {
+                console.error('Failed to update session csrf token in D1:', err);
+              });
+            }
+
             actor = {
               id: sessionRow.user_id,
               workspace_id: sessionRow.workspace_id,
@@ -294,8 +320,9 @@ export function createAuthMiddleware(appKey: 'CRM' | 'PIPELINE' = 'CRM'): Middle
               status: sessionRow.status as UserStatus,
               scopes,
               session_id_hash: sessionRow.id_hash,
-              csrf_token_hash: sessionRow.csrf_token_hash,
-              csrf_token: sessionRow.user_agent_hash,
+              csrf_token_hash: csrfTokenHash,
+              csrf_token: rawCsrfToken,
+              legacy_ua_hash: legacyUaHash,
               reauthenticated_at: sessionRow.reauthenticated_at,
               is_cookie_session: tokenInfo.isCookie
             };
@@ -339,7 +366,17 @@ export function createAuthMiddleware(appKey: 'CRM' | 'PIPELINE' = 'CRM'): Middle
     const method = c.req.method.toUpperCase();
     if (actor.is_cookie_session && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
       if (path !== '/api/auth/logout') {
-        const reqCsrf = c.req.header('X-CSRF-Token');
+        let reqCsrf = c.req.header('X-CSRF-Token');
+
+        // Double-submit cookie fallback if header was omitted by older bundles
+        if (!reqCsrf) {
+          const cookieHeader = c.req.header('cookie') || '';
+          const match = cookieHeader.match(/(?:^|;\s*)biai_csrf=([^;]+)/);
+          if (match && match[1]) {
+            reqCsrf = decodeURIComponent(match[1]);
+          }
+        }
+
         if (!reqCsrf) {
           return c.json({
             error: 'Forbidden: CSRF token missing from request headers',
@@ -348,9 +385,11 @@ export function createAuthMiddleware(appKey: 'CRM' | 'PIPELINE' = 'CRM'): Middle
         }
 
         const hashedReqCsrf = await hashToken(reqCsrf);
-        const validCsrf = actor.csrf_token_hash
-          ? constantTimeCompare(hashedReqCsrf, actor.csrf_token_hash)
-          : !isProduction;
+        const validCsrf = (actor.csrf_token_hash && constantTimeCompare(hashedReqCsrf, actor.csrf_token_hash))
+          || (actor.csrf_token && constantTimeCompare(reqCsrf, actor.csrf_token))
+          || (actor.legacy_ua_hash && constantTimeCompare(reqCsrf, actor.legacy_ua_hash))
+          || (!isProduction);
+
         if (!validCsrf) {
           return c.json({
             error: 'Forbidden: Invalid CSRF token',

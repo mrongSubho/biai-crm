@@ -331,7 +331,7 @@
     }
     return {
       'Content-Type': 'application/json',
-      ...(token ? { 'X-CSRF-Token': token } : {}),
+      'X-CSRF-Token': token || '',
       ...extra
     };
   }
