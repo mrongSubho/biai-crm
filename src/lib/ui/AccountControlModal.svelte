@@ -321,9 +321,17 @@
   }
 
   function authHeaders(extra: Record<string, string> = {}) {
+    let token = csrfToken;
+    if (!token && typeof document !== 'undefined') {
+      const match = document.cookie.match(/(?:^|;\s*)biai_csrf=([^;]+)/);
+      if (match && match[1]) token = decodeURIComponent(match[1]);
+    }
+    if (!token && typeof sessionStorage !== 'undefined') {
+      token = sessionStorage.getItem('biai_csrf') || '';
+    }
     return {
       'Content-Type': 'application/json',
-      ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+      ...(token ? { 'X-CSRF-Token': token } : {}),
       ...extra
     };
   }

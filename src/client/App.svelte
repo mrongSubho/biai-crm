@@ -79,7 +79,23 @@
     security_tier: string;
     scopes: string[];
   } | null>(null);
-  let csrfToken = $state(typeof sessionStorage !== 'undefined' ? (sessionStorage.getItem('biai_csrf') || '') : '');
+
+  function getCsrfFromCookieOrStorage(): string {
+    if (typeof document !== 'undefined') {
+      const match = document.cookie.match(/(?:^|;\s*)biai_csrf=([^;]+)/);
+      if (match && match[1]) return decodeURIComponent(match[1]);
+    }
+    if (typeof sessionStorage !== 'undefined') {
+      return sessionStorage.getItem('biai_csrf') || '';
+    }
+    return '';
+  }
+
+  let csrfToken = $state(getCsrfFromCookieOrStorage());
+
+  function getActiveCsrf(): string {
+    return csrfToken || getCsrfFromCookieOrStorage();
+  }
   let authChecking = $state(true);
   let loginEmail = $state('');
   let loginPassword = $state('');
@@ -177,6 +193,12 @@
         currentUser = meData;
         if (meData.csrfToken) {
           csrfToken = meData.csrfToken;
+          if (typeof sessionStorage !== 'undefined') {
+            sessionStorage.setItem('biai_csrf', csrfToken);
+          }
+          if (typeof document !== 'undefined') {
+            document.cookie = `biai_csrf=${encodeURIComponent(csrfToken)}; Path=/; SameSite=Lax; Max-Age=604800`;
+          }
         }
         await loadEnquiries();
         await refreshUnreadMessages();
@@ -250,6 +272,9 @@
       if (typeof sessionStorage !== 'undefined') {
         sessionStorage.setItem('biai_csrf', csrfToken);
       }
+      if (typeof document !== 'undefined' && csrfToken) {
+        document.cookie = `biai_csrf=${encodeURIComponent(csrfToken)}; Path=/; SameSite=Lax; Max-Age=604800`;
+      }
       currentUser = data.user;
       loginRequiresMfa = false;
       await loadEnquiries();
@@ -264,9 +289,15 @@
     try {
       await fetch('/api/auth/logout', {
         method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken },
+        headers: { 'X-CSRF-Token': getActiveCsrf() },
         credentials: 'include'
       });
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.removeItem('biai_csrf');
+      }
+      if (typeof document !== 'undefined') {
+        document.cookie = 'biai_csrf=; Path=/; SameSite=Lax; Max-Age=0';
+      }
     } catch {}
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.removeItem('biai_csrf');
@@ -591,7 +622,7 @@
     // Persist to D1 in background
     fetch(`/api/v1/enquiries/${selectedEnquiry.id}/status`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getActiveCsrf() },
       credentials: 'include',
       body: JSON.stringify({ newStatus: selectedEnquiry.ticket_status || 'OPEN', notes: newNote.content })
     }).catch(e => console.log('Local action cached', e));
@@ -789,7 +820,7 @@
     // Persist to D1 in background
     fetch(`/api/v1/enquiries/${id}/reply`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getActiveCsrf() },
       credentials: 'include',
       body: JSON.stringify({ replyText: textToSend, channel: selectedEnquiry?.channel })
     })
@@ -878,7 +909,7 @@
     // Persist to D1 in background
     fetch(`/api/v1/enquiries/${id}/stage`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getActiveCsrf() },
       credentials: 'include',
       body: JSON.stringify({ newStage: stage })
     }).catch(e => console.log('Local action cached', e));
@@ -897,7 +928,7 @@
     // Persist to D1 in background
     fetch(`/api/v1/enquiries/${id}/status`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getActiveCsrf() },
       credentials: 'include',
       body: JSON.stringify({ newStatus: status, notes })
     }).catch(e => console.log('Local action cached', e));
@@ -961,11 +992,12 @@
 
     // Background server ingestion & D1 persistence
     try {
+      const activeCsrf = getActiveCsrf();
       await fetch('/api/v1/enquiries/parse', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
+          ...(activeCsrf ? { 'X-CSRF-Token': activeCsrf } : {})
         },
         credentials: 'include',
         body: JSON.stringify({
@@ -2731,7 +2763,7 @@
   <AccountControlModal
     isOpen={showAccountModal}
     currentUser={currentUser}
-    csrfToken={csrfToken}
+    csrfToken={getActiveCsrf()}
     workspaceType="CRM"
     onClose={() => showAccountModal = false}
     onUserUpdated={(u) => { if (currentUser) currentUser = { ...currentUser, ...u }; }}
@@ -2741,6 +2773,7 @@
   <MessagingCenterModal
     isOpen={showMessagingModal}
     currentUser={currentUser}
+    csrfToken={getActiveCsrf()}
     initialContext={messagingContext}
     workspaceType="CRM"
     onClose={() => { showMessagingModal = false; messagingContext = null; refreshUnreadMessages(); }}

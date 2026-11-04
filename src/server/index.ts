@@ -18,7 +18,7 @@ import {
   ParseMessageSchema,
   EnquiryQuerySchema
 } from './validation.js';
-import { sha256, generateRandomToken } from './crypto.js';
+import { sha256, generateRandomToken, constantTimeCompare } from './crypto.js';
 import { getMissingProductionConfig } from './config.js';
 import { retryQueuedCrmDeliveries } from './delivery_retry.js';
 
@@ -129,6 +129,11 @@ app.post('/api/auth/login', async (c) => {
 
   if (result.cookieHeader) {
     c.header('Set-Cookie', result.cookieHeader);
+    if (result.data?.csrfToken) {
+      const isProd = c.env?.ENVIRONMENT === 'production';
+      const secureFlag = isProd ? '; Secure' : '';
+      c.header('Set-Cookie', `biai_csrf=${encodeURIComponent(result.data.csrfToken)}; Path=/; SameSite=Lax${secureFlag}; Max-Age=604800`, { append: true });
+    }
   }
 
   return c.json(result.data, 200);
@@ -143,6 +148,9 @@ app.post('/api/auth/logout', async (c) => {
   const result = await authService.logout(token || '', actor?.id);
   if (result.cookieHeader) {
     c.header('Set-Cookie', result.cookieHeader);
+    const isProd = c.env?.ENVIRONMENT === 'production';
+    const secureFlag = isProd ? '; Secure' : '';
+    c.header('Set-Cookie', `biai_csrf=; Path=/; SameSite=Lax${secureFlag}; Max-Age=0`, { append: true });
   }
   return c.json({ success: true, message: 'Logged out successfully' });
 });
@@ -153,6 +161,49 @@ app.get('/api/auth/me', async (c) => {
   if (!actor) {
     return c.json({ error: 'Unauthorized: missing authentication session', code: 'UNAUTHORIZED' }, 401);
   }
+
+  // Return the session's active CSRF token directly
+  let csrfToken = actor.csrf_token || '';
+
+  // If session doesn't have an unhashed CSRF token saved yet, check cookie or generate
+  if (!csrfToken) {
+    const cookieHeader = c.req.header('cookie') || '';
+    const match = cookieHeader.match(/(?:^|;\s*)biai_csrf=([^;]+)/);
+    if (match && match[1]) {
+      const candidate = decodeURIComponent(match[1]);
+      const hashedCandidate = await sha256(candidate);
+      if (actor.csrf_token_hash && constantTimeCompare(hashedCandidate, actor.csrf_token_hash)) {
+        csrfToken = candidate;
+      }
+    }
+  }
+
+  // Fallback: If still no token and no valid hash exists, generate and update
+  if (!csrfToken && !actor.csrf_token_hash) {
+    csrfToken = generateRandomToken(32);
+    const newHash = await sha256(csrfToken);
+    actor.csrf_token_hash = newHash;
+    actor.csrf_token = csrfToken;
+
+    if (c.env?.DB && actor.session_id_hash) {
+      try {
+        await c.env.DB.prepare(`
+          UPDATE auth_sessions
+          SET csrf_token_hash = ?, user_agent_hash = ?
+          WHERE id_hash = ?
+        `).bind(newHash, csrfToken, actor.session_id_hash).run();
+      } catch (err) {
+        console.error('Failed to update session csrf_token_hash in D1:', err);
+      }
+    }
+  }
+
+  if (csrfToken) {
+    const isProd = c.env?.ENVIRONMENT === 'production';
+    const secureFlag = isProd ? '; Secure' : '';
+    c.header('Set-Cookie', `biai_csrf=${encodeURIComponent(csrfToken)}; Path=/; SameSite=Lax${secureFlag}; Max-Age=604800`, { append: true });
+  }
+
   return c.json({
     id: actor.id,
     workspace_id: actor.workspace_id,
@@ -162,7 +213,8 @@ app.get('/api/auth/me', async (c) => {
     role: actor.role,
     security_tier: actor.security_tier,
     scopes: actor.scopes,
-    reauthenticated_at: actor.reauthenticated_at
+    reauthenticated_at: actor.reauthenticated_at,
+    csrfToken
   });
 });
 

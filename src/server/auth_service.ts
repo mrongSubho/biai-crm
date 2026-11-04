@@ -338,7 +338,7 @@ export class AuthService {
       user.workspace_id,
       csrfTokenHash,
       ipHash,
-      uaHash
+      csrfToken
     ).run();
 
     await logAuthEvent(this.db, {

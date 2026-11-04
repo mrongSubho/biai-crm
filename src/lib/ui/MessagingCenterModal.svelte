@@ -12,6 +12,7 @@
   interface Props {
     isOpen: boolean;
     currentUser: OperatorUser | null;
+    csrfToken?: string;
     initialContext?: { type: 'ENQUIRY' | 'LEAD'; id: string; label?: string } | null;
     workspaceType?: 'CRM' | 'PIPELINE';
     onClose: () => void;
@@ -21,11 +22,28 @@
   let {
     isOpen,
     currentUser,
+    csrfToken = '',
     initialContext = null,
     workspaceType = 'CRM',
     onClose,
     onNavigateContext
   }: Props = $props();
+
+  function authHeaders(extra: Record<string, string> = {}) {
+    let activeToken = csrfToken;
+    if (!activeToken && typeof document !== 'undefined') {
+      const match = document.cookie.match(/(?:^|;\s*)biai_csrf=([^;]+)/);
+      if (match && match[1]) activeToken = decodeURIComponent(match[1]);
+    }
+    if (!activeToken && typeof sessionStorage !== 'undefined') {
+      activeToken = sessionStorage.getItem('biai_csrf') || '';
+    }
+    return {
+      'Content-Type': 'application/json',
+      ...(activeToken ? { 'X-CSRF-Token': activeToken } : {}),
+      ...extra
+    };
+  }
 
   // View state
   type FilterChannel = 'ALL' | 'DIRECTIVES' | 'OWNER_OPS' | 'UNREAD';
@@ -185,7 +203,8 @@
     try {
       const res = await fetch(`/api/v1/messages/threads/${activeThreadId}/messages`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
+        credentials: 'include',
         body: JSON.stringify({ content: replyText.trim() })
       });
       const data = await res.json();
@@ -208,7 +227,8 @@
     try {
       const res = await fetch(`/api/v1/messages/threads/${activeThreadId}/acknowledge`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
+        credentials: 'include',
         body: JSON.stringify({})
       });
       const data = await res.json();
@@ -256,7 +276,8 @@
 
       const res = await fetch('/api/v1/messages/threads', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
+        credentials: 'include',
         body: JSON.stringify(payload)
       });
       const data = await res.json();

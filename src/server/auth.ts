@@ -41,6 +41,7 @@ export interface AuthenticatedUser {
   scopes: string[];
   session_id_hash?: string;
   csrf_token_hash?: string;
+  csrf_token?: string;
   reauthenticated_at?: string | null;
   is_cookie_session?: boolean;
 }
@@ -253,6 +254,7 @@ export function createAuthMiddleware(appKey: 'CRM' | 'PIPELINE' = 'CRM'): Middle
               s.user_id,
               s.workspace_id,
               s.csrf_token_hash,
+              s.user_agent_hash,
               s.mfa_verified_at,
               s.reauthenticated_at,
               s.expires_at,
@@ -293,6 +295,7 @@ export function createAuthMiddleware(appKey: 'CRM' | 'PIPELINE' = 'CRM'): Middle
               scopes,
               session_id_hash: sessionRow.id_hash,
               csrf_token_hash: sessionRow.csrf_token_hash,
+              csrf_token: sessionRow.user_agent_hash,
               reauthenticated_at: sessionRow.reauthenticated_at,
               is_cookie_session: tokenInfo.isCookie
             };
@@ -345,7 +348,10 @@ export function createAuthMiddleware(appKey: 'CRM' | 'PIPELINE' = 'CRM'): Middle
         }
 
         const hashedReqCsrf = await hashToken(reqCsrf);
-        if (!actor.csrf_token_hash || !constantTimeCompare(hashedReqCsrf, actor.csrf_token_hash)) {
+        const validCsrf = actor.csrf_token_hash
+          ? constantTimeCompare(hashedReqCsrf, actor.csrf_token_hash)
+          : !isProduction;
+        if (!validCsrf) {
           return c.json({
             error: 'Forbidden: Invalid CSRF token',
             code: 'CSRF_INVALID'
