@@ -13,6 +13,8 @@
   // --- THEME & VIEWPORT STATE ---
   let theme = $state<'dark' | 'light'>('light');
   let viewMode = $state<'inbox' | 'board'>('inbox');
+  let boardInspectorOpen = $state(false);
+  let boardScrollContainer: HTMLDivElement | null = $state(null);
   let evaluatorMode = $state(false);
   let showParserModal = $state(false);
   let showAccountModal = $state(false);
@@ -195,6 +197,10 @@
         e.preventDefault();
         selectNextLead(-1);
       } else if (e.key === 'Escape') {
+        if (boardInspectorOpen && viewMode === 'board') {
+          boardInspectorOpen = false;
+          return;
+        }
         if (showParserModal) showParserModal = false;
         if (mobileNavOpen) mobileNavOpen = false;
       }
@@ -342,6 +348,22 @@
     }
   });
 
+  function switchViewMode(mode: 'inbox' | 'board') {
+    viewMode = mode;
+    if (mode === 'board') {
+      boardInspectorOpen = false;
+    }
+  }
+
+  function centerBoardColumn(stage: string) {
+    setTimeout(() => {
+      const colEl = document.getElementById(`kanban-col-${stage}`);
+      if (colEl && boardScrollContainer) {
+        colEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      }
+    }, 60);
+  }
+
   function selectLead(id: number) {
     selectedId = id;
     const item = evaluatedEnquiries.find(e => e.id === id);
@@ -354,6 +376,12 @@
     }
   }
 
+  function selectLeadOnBoard(id: number, stage: PipelineStage) {
+    selectLead(id);
+    boardInspectorOpen = true;
+    centerBoardColumn(stage);
+  }
+
   function selectNextLead(delta: number) {
     const list = filteredEnquiries;
     if (list.length === 0) return;
@@ -361,7 +389,11 @@
     let nextIndex = currentIndex + delta;
     if (nextIndex < 0) nextIndex = 0;
     if (nextIndex >= list.length) nextIndex = list.length - 1;
-    selectLead(list[nextIndex].id);
+    const targetLead = list[nextIndex];
+    selectLead(targetLead.id);
+    if (viewMode === 'board' && boardInspectorOpen && targetLead.pipeline_stage) {
+      centerBoardColumn(targetLead.pipeline_stage);
+    }
   }
 
   // --- ACTIONS ---
@@ -403,6 +435,10 @@
     });
     soundFx.playActionSuccess();
     showFeedback(`Stage transitioned to ${stage}`);
+
+    if (viewMode === 'board' && boardInspectorOpen) {
+      centerBoardColumn(stage);
+    }
 
     // Persist to D1 in background
     fetch(`/api/v1/enquiries/${id}/stage`, {
@@ -1129,12 +1165,12 @@
           <!-- View Switcher: Inbox Stream vs Kanban Board -->
           <div class="flex items-center gap-1 bg-warm-100 dark:bg-slate-800 p-0.5 rounded-md text-[11px]">
             <button
-              onclick={() => viewMode = 'inbox'}
+              onclick={() => switchViewMode('inbox')}
               class="px-2 py-0.5 rounded font-medium transition bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs">
               Inbox
             </button>
             <button
-              onclick={() => viewMode = 'board'}
+              onclick={() => switchViewMode('board')}
               class="px-2 py-0.5 rounded font-medium transition text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
               Board
             </button>
@@ -1238,33 +1274,64 @@
     {:else}
       <!-- KANBAN BOARD VIEW (CONTAINED COLUMNS & INVARIANT CARDS) -->
       <section class="flex-1 min-w-0 border-r border-warm-200 dark:border-slate-800 bg-warm-100/50 dark:bg-slate-950 flex flex-col overflow-hidden min-h-0">
-        <!-- Board Header with Switcher -->
+        <!-- Board Header with Switcher & Panoramic Status -->
         <div class="h-10 border-b border-warm-200 dark:border-slate-800 px-4 flex items-center justify-between bg-white dark:bg-slate-900 text-xs shrink-0">
           <div class="flex items-center gap-3">
             <span class="font-bold text-slate-900 dark:text-white">Pipeline Stages</span>
             <span class="text-slate-400 font-mono tabular-nums text-[11px]">({filteredEnquiries.length} total)</span>
+            {#if boardInspectorOpen}
+              <span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 flex items-center gap-1.5 animate-in fade-in duration-150">
+                <span class="w-1.5 h-1.5 rounded-full bg-orange-600"></span>
+                <span class="max-w-[130px] sm:max-w-[180px] truncate">Inspecting: {selectedEnquiry?.sender_name || 'Inquiry'}</span>
+                <button
+                  type="button"
+                  onclick={() => boardInspectorOpen = false}
+                  class="hover:text-orange-950 dark:hover:text-white ml-0.5 text-xs font-bold leading-none"
+                  title="Close inspector and expand all 5 stages (Esc)">×</button>
+              </span>
+            {/if}
           </div>
 
-          <div class="flex items-center gap-1 bg-warm-100 dark:bg-slate-800 p-0.5 rounded-md text-[11px]">
-            <button
-              onclick={() => viewMode = 'inbox'}
-              class="px-2 py-0.5 rounded font-medium transition text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
-              Inbox
-            </button>
-            <button
-              onclick={() => viewMode = 'board'}
-              class="px-2 py-0.5 rounded font-medium transition bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs">
-              Board
-            </button>
+          <div class="flex items-center gap-2">
+            {#if boardInspectorOpen}
+              <button
+                type="button"
+                onclick={() => boardInspectorOpen = false}
+                class="text-[11px] font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white px-2 py-0.5 rounded border border-warm-200 dark:border-slate-700 hover:bg-warm-100 dark:hover:bg-slate-800 transition flex items-center gap-1"
+                title="Expand to panoramic 5-stage pipeline view (Esc)">
+                <Icon name="x" size={12} />
+                <span class="hidden sm:inline">Show All 5 Stages</span>
+                <kbd class="text-[9px] font-mono px-1 py-0.2 rounded bg-warm-200 dark:bg-slate-800 text-slate-500">Esc</kbd>
+              </button>
+            {/if}
+
+            <div class="flex items-center gap-1 bg-warm-100 dark:bg-slate-800 p-0.5 rounded-md text-[11px]">
+              <button
+                onclick={() => switchViewMode('inbox')}
+                class={`px-2 py-0.5 rounded font-medium transition ${viewMode === 'inbox' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+                Inbox
+              </button>
+              <button
+                onclick={() => switchViewMode('board')}
+                class={`px-2 py-0.5 rounded font-medium transition ${viewMode === 'board' ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+                Board
+              </button>
+            </div>
           </div>
         </div>
 
         <!-- 5 Stage Columns (BOARD DOES NOT SCROLL VERTICALLY, COLUMNS FIT VIEWPORT) -->
-        <div class="flex-1 overflow-x-auto overflow-y-hidden overscroll-contain p-3.5 flex gap-3 min-w-0 min-h-0">
+        <div
+          bind:this={boardScrollContainer}
+          class="flex-1 overflow-x-auto overflow-y-hidden overscroll-contain p-3.5 flex gap-3 min-w-0 min-h-0">
           {#each salesStages as stage}
             {@const stageItems = filteredEnquiries.filter(e => e.pipeline_stage === stage)}
             {@const stageSum = stageItems.reduce((acc, e) => acc + (e.estimated_value_bdt || 0), 0)}
-            <div class="kanban-column w-72 shrink-0 flex flex-col bg-white/70 dark:bg-slate-900/60 rounded-xl border border-warm-200 dark:border-slate-800 overflow-hidden shadow-xs h-full min-h-0">
+            <div
+              id={`kanban-col-${stage}`}
+              class={`kanban-column flex flex-col bg-white/70 dark:bg-slate-900/60 rounded-xl border border-warm-200 dark:border-slate-800 overflow-hidden shadow-xs h-full min-h-0 transition-all duration-200 ${
+                boardInspectorOpen ? 'w-72 shrink-0' : 'flex-1 min-w-[200px] max-w-[340px] shrink-0'
+              }`}>
               <div class="p-3 border-b border-warm-200 dark:border-slate-800 bg-warm-50 dark:bg-slate-900 flex items-center justify-between shrink-0">
                 <div class="flex items-center gap-2">
                   <span class="font-bold text-xs text-slate-800 dark:text-slate-200">{stage}</span>
@@ -1291,10 +1358,10 @@
                     <div
                       role="button"
                       tabindex="0"
-                      onclick={() => selectLead(item.id)}
-                      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectLead(item.id); } }}
+                      onclick={() => selectLeadOnBoard(item.id, stage)}
+                      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectLeadOnBoard(item.id, stage); } }}
                       class={`work-card group relative w-full text-left p-3 rounded-lg border transition-colors duration-150 cursor-pointer ${item.railClass} ${
-                        isSelected
+                        isSelected && boardInspectorOpen
                           ? 'bg-orange-50/80 border-orange-400 dark:bg-orange-950/30 dark:border-orange-700 ring-2 ring-orange-600/50'
                           : 'bg-white hover:bg-warm-100/70 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-800'
                       }`}>
@@ -1346,12 +1413,13 @@
     <!-- PANE 3: PERSISTENT LEAD INSPECTOR & AI ACTION STUDIO   -->
     <!-- (FIT IN ONE PAGE, ZERO SCROLL EXCEPT MESSAGE BODIES)  -->
     <!-- ------------------------------------------------------ -->
-    <main class={`detail-panel ${viewMode === 'board' ? 'w-full lg:w-[420px] xl:w-[450px] shrink-0 border-l border-warm-200 dark:border-slate-800' : 'flex-1'} bg-white dark:bg-slate-900 flex flex-col h-full min-h-0 overflow-hidden`}>
-      {#if !selectedEnquiry}
-        <div class="m-auto text-center py-20 text-slate-400 text-sm">
-          Select an inquiry from the inbox stream to inspect.
-        </div>
-      {:else}
+    {#if viewMode === 'inbox' || boardInspectorOpen}
+      <main class={`detail-panel ${viewMode === 'board' ? 'w-full md:w-[420px] lg:w-[450px] xl:w-[480px] shrink-0 border-l border-warm-200 dark:border-slate-800 shadow-xl z-20' : 'flex-1'} bg-white dark:bg-slate-900 flex flex-col h-full min-h-0 overflow-hidden`}>
+        {#if !selectedEnquiry}
+          <div class="m-auto text-center py-20 text-slate-400 text-sm">
+            Select an inquiry from the stream to inspect.
+          </div>
+        {:else}
         <!-- Inspector Top Header: Contact Identity & Actions (shrink-0) -->
         <div class="p-3.5 border-b border-warm-200 dark:border-slate-800 flex items-start justify-between gap-3 bg-warm-50/50 dark:bg-slate-900/60 shrink-0">
           <div>
@@ -1439,6 +1507,17 @@
               <Icon name="message-square" size={13} class="text-orange-600 dark:text-orange-400" />
               <span class="hidden sm:inline">Directive</span>
             </button>
+
+            <!-- Close Inspector on Board View to show all 5 stages -->
+            {#if viewMode === 'board'}
+              <button
+                type="button"
+                onclick={() => boardInspectorOpen = false}
+                class="p-1 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-warm-200/80 dark:hover:bg-slate-800 transition flex items-center gap-1 shrink-0 ml-0.5"
+                title="Close detail panel and show all 5 stages (Esc)">
+                <Icon name="x" size={16} />
+              </button>
+            {/if}
           </div>
         </div>
 
@@ -1578,6 +1657,7 @@
         </div>
       {/if}
     </main>
+    {/if}
   </div>
 
   <!-- Ingest Inbound Message Modal (Bounded Transition & Accessible Dismiss) -->
