@@ -11,6 +11,9 @@ routes = [
 [triggers]
 crons = ["*/5 * * * *"]
 
+[build]
+command = "npm run build"
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"
@@ -28,4 +31,10 @@ binding = "AI"
 ENVIRONMENT = "production"
 DEFAULT_TIMEZONE = "Asia/Dhaka"
 WORKSPACE_ID = "ws_biai_main"
-ALLOWED_ORIGINS = "https://biaicrm.mrong.tech,https://biaileads.mrong.tech"
+ALLOWED_ORIGINS = "https://biaicrm.mrong.tech,https://biaileads.mrong.tech,http://localhost:5173,http://localhost:8787"
+MFA_ENCRYPTION_KEY = "biai_mfa_enc_prod_89f3a9e145b208c901e8a27d3c8b4112"
+META_APP_SECRET = "meta_demo_app_secret_biai_crm_2026"
+META_WEBHOOK_VERIFY_TOKEN = "biai_meta_webhook_verify_token_2026"
+META_WHATSAPP_TOKEN = "meta_demo_whatsapp_cloud_token_2026"
+META_PHONE_NUMBER_ID = "109823746501928"
+

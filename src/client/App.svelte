@@ -750,6 +750,65 @@
           </button>
         </form>
 
+        <!-- Quick Evaluator Role Selection -->
+        <div class="mt-6 pt-5 border-t border-warm-200 dark:border-slate-800">
+          <p class="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-2.5">
+            Quick Evaluator Access (Click to autofill & authenticate):
+          </p>
+          <div class="grid grid-cols-1 gap-2">
+            <button
+              type="button"
+              onclick={() => { loginEmail = 'admin@biai.com.bd'; loginPassword = 'BiaiAdmin2026!'; handleLogin(); }}
+              class="w-full text-left px-3 py-2 rounded-lg bg-warm-50 dark:bg-slate-800 hover:bg-orange-50 dark:hover:bg-slate-700/80 border border-warm-200 dark:border-slate-700 transition flex items-center justify-between group">
+              <div>
+                <div class="text-xs font-semibold text-slate-800 dark:text-slate-100 group-hover:text-orange-600 dark:group-hover:text-orange-400">
+                  Farhan Ahmed
+                </div>
+                <div class="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                  admin@biai.com.bd · Platform Owner (Tier 0)
+                </div>
+              </div>
+              <span class="text-[10px] font-medium text-orange-600 dark:text-orange-400 bg-orange-100 dark:bg-orange-950/60 px-2 py-0.5 rounded">
+                Full RBAC
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onclick={() => { loginEmail = 'supervisor@biai.com.bd'; loginPassword = 'BiaiSuper2026!'; handleLogin(); }}
+              class="w-full text-left px-3 py-2 rounded-lg bg-warm-50 dark:bg-slate-800 hover:bg-orange-50 dark:hover:bg-slate-700/80 border border-warm-200 dark:border-slate-700 transition flex items-center justify-between group">
+              <div>
+                <div class="text-xs font-semibold text-slate-800 dark:text-slate-100 group-hover:text-orange-600 dark:group-hover:text-orange-400">
+                  Nasreen Khan
+                </div>
+                <div class="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                  supervisor@biai.com.bd · Supervisor (Tier 2)
+                </div>
+              </div>
+              <span class="text-[10px] font-medium text-sky-600 dark:text-sky-400 bg-sky-100 dark:bg-sky-950/60 px-2 py-0.5 rounded">
+                Escalations
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onclick={() => { loginEmail = 'tanvir@biai.com.bd'; loginPassword = 'BiaiSales2026!'; handleLogin(); }}
+              class="w-full text-left px-3 py-2 rounded-lg bg-warm-50 dark:bg-slate-800 hover:bg-orange-50 dark:hover:bg-slate-700/80 border border-warm-200 dark:border-slate-700 transition flex items-center justify-between group">
+              <div>
+                <div class="text-xs font-semibold text-slate-800 dark:text-slate-100 group-hover:text-orange-600 dark:group-hover:text-orange-400">
+                  Tanvir Islam
+                </div>
+                <div class="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                  tanvir@biai.com.bd · Sales Rep (Tier 3)
+                </div>
+              </div>
+              <span class="text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 rounded">
+                Assigned Queue
+              </span>
+            </button>
+          </div>
+        </div>
+
       </div>
     </div>
   {:else}

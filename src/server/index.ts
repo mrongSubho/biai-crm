@@ -46,6 +46,10 @@ const app = new Hono<{
 }>();
 
 app.use('*', async (c, next) => {
+  // Allow healthcheck and static assets without configuration blockage
+  if (c.req.path === '/api/health' || !c.req.path.startsWith('/api/')) {
+    return next();
+  }
   const missing = getMissingProductionConfig(c.env as unknown as Record<string, unknown>);
   if (missing.length > 0) {
     return c.json({
