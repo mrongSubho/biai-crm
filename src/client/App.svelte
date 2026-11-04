@@ -1750,41 +1750,87 @@
             Select an inquiry from the stream to inspect.
           </div>
         {:else}
-        <!-- Inspector Top Header: Contact Identity & Actions (shrink-0) -->
-        <div class="p-3.5 border-b border-warm-200 dark:border-slate-800 flex items-start justify-between gap-2.5 bg-warm-50/50 dark:bg-slate-900/60 shrink-0">
-          <div class="min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-1.5">
-              <h2 class="text-base font-bold text-slate-900 dark:text-white truncate">
+        <!-- Inspector Top Header: Contact Identity & Actions (shrink-0, tight 2-row layout using full horizontal space) -->
+        <div class="px-3.5 py-2.5 border-b border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-900/60 shrink-0 space-y-1">
+          <!-- Row 1: Name, Priority Badge, Org on Left | Stage, Directive, Close on Right -->
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-1.5 min-w-0">
+              <h2 class="text-sm font-bold text-slate-900 dark:text-white truncate">
                 {selectedEnquiry.sender_name}
               </h2>
 
-              <span class={`text-[9.5px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0 ${
+              <span class={`text-[9px] font-bold px-1.5 py-0.2 rounded uppercase tracking-wider shrink-0 ${
                 selectedEnquiry.businessPriority === 'P0'
                   ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
                   : 'bg-warm-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
               }`}>
                 {selectedEnquiry.businessPriority} · {selectedEnquiry.priorityReason}
               </span>
+
+              {#if (selectedEnquiry as any).organization}
+                <span class="text-[10.5px] text-slate-500 dark:text-slate-400 truncate hidden sm:inline">
+                  • {(selectedEnquiry as any).organization}
+                </span>
+              {/if}
             </div>
 
-            <!-- Organization & Role -->
-            {#if (selectedEnquiry as any).organization}
-              <p class="text-[11px] text-slate-600 dark:text-slate-400 truncate mt-0.5">
-                {(selectedEnquiry as any).role ? `${(selectedEnquiry as any).role}, ` : ''}{(selectedEnquiry as any).organization}
-              </p>
-            {/if}
+            <!-- Right Controls: Stage Select, Directive, Close (X) -->
+            <div class="flex items-center gap-1.5 shrink-0">
+              {#if (selectedEnquiry as any).ticket_status && (selectedEnquiry as any).ticket_status !== 'OPEN'}
+                <span class="text-[9px] font-mono px-1.5 py-0.2 rounded font-bold uppercase tracking-wider bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                  {(selectedEnquiry as any).ticket_status}
+                </span>
+              {/if}
 
-            <!-- Contact Metadata Row -->
-            <div class="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mt-1 font-mono tabular-nums">
+              <label for="stage-select" class="text-[11px] text-slate-400">Stage:</label>
+              <select
+                id="stage-select"
+                value={selectedEnquiry.pipeline_stage}
+                onchange={(e) => transitionStage(selectedEnquiry.id, (e.target as HTMLSelectElement).value as PipelineStage)}
+                class="text-xs font-medium border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-lg px-2 py-0.5 focus:ring-1 focus:ring-orange-600 focus:outline-none">
+                {#each salesStages as st}
+                  <option value={st}>{st}</option>
+                {/each}
+              </select>
+
+              <button
+                type="button"
+                onclick={() => {
+                  messagingContext = { type: 'ENQUIRY', id: String(selectedEnquiry.id), label: selectedEnquiry.sender_name };
+                  showMessagingModal = true;
+                }}
+                class="px-2 py-0.5 rounded-lg bg-warm-100 hover:bg-warm-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium transition flex items-center gap-1 shrink-0"
+                title="Dispatch internal command directive for this inquiry">
+                <Icon name="message-square" size={12} class="text-orange-600 dark:text-orange-400" />
+                <span class="hidden sm:inline">Directive</span>
+              </button>
+
+              {#if viewMode === 'board'}
+                <button
+                  type="button"
+                  onclick={() => boardInspectorOpen = false}
+                  class="p-0.5 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-warm-200/80 dark:hover:bg-slate-800 transition flex items-center gap-1 shrink-0 ml-0.5"
+                  title="Close detail panel and show all 5 stages (Esc)">
+                  <Icon name="x" size={15} />
+                </button>
+              {/if}
+            </div>
+          </div>
+
+          <!-- Row 2: Channel & Phone on Left | Received Timestamp on Right (using empty right space) -->
+          <div class="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-mono tabular-nums pt-0.5">
+            <div class="flex items-center gap-2.5 truncate">
               <span class="flex items-center gap-1">
-                <span>Channel:</span>
-                <span class="font-semibold text-slate-800 dark:text-slate-200">{selectedEnquiry.channel}</span>
+                <span class="text-slate-400 font-sans">Channel:</span>
+                <span class="font-semibold text-slate-700 dark:text-slate-200">{selectedEnquiry.channel}</span>
               </span>
+
+              <span>•</span>
 
               {#if selectedEnquiry.normalized_phone || selectedEnquiry.phone}
                 <span class="flex items-center gap-1">
-                  <span>Phone:</span>
-                  <span class="font-semibold text-slate-800 dark:text-slate-200">
+                  <span class="text-slate-400 font-sans">Phone:</span>
+                  <span class="font-semibold text-slate-700 dark:text-slate-200">
                     {selectedEnquiry.normalized_phone || selectedEnquiry.phone}
                   </span>
                   <button
@@ -1792,73 +1838,32 @@
                     onclick={() => copyToClipboard(selectedEnquiry.normalized_phone || selectedEnquiry.phone, 'Phone number')}
                     class="text-orange-600 hover:text-orange-700 ml-0.5 inline-flex items-center"
                     title="Copy normalized phone number">
-                    <Icon name="copy" size={12} />
+                    <Icon name="copy" size={11} />
                   </button>
                 </span>
               {:else}
-                <span class="text-amber-600 font-sans text-[11px] inline-flex items-center gap-1">
-                  <Icon name="phone-off" size={12} />
+                <span class="text-amber-600 font-sans inline-flex items-center gap-1">
+                  <Icon name="phone-off" size={11} />
                   <span>Missing Phone</span>
                 </span>
               {/if}
-
-              <span>·</span>
-              <span class="text-[11px]">Received: {selectedEnquiry.received_at}</span>
             </div>
-          </div>
 
-          <!-- Pipeline Stage Selector Dropdown & Directive -->
-          <div class="flex items-center gap-1.5 shrink-0 ml-auto">
-            {#if (selectedEnquiry as any).ticket_status && (selectedEnquiry as any).ticket_status !== 'OPEN'}
-              <span class="text-[9.5px] font-mono px-1.5 py-0.5 rounded font-bold uppercase tracking-wider bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
-                {(selectedEnquiry as any).ticket_status}
-              </span>
-            {/if}
-            <label for="stage-select" class="text-xs text-slate-400">Stage:</label>
-            <select
-              id="stage-select"
-              value={selectedEnquiry.pipeline_stage}
-              onchange={(e) => transitionStage(selectedEnquiry.id, (e.target as HTMLSelectElement).value as PipelineStage)}
-              class="text-xs font-medium border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-lg px-2 py-1 focus:ring-1 focus:ring-orange-600 focus:outline-none">
-              {#each salesStages as st}
-                <option value={st}>{st}</option>
-              {/each}
-            </select>
-
-            <!-- Command Message Quick Escalation -->
-            <button
-              type="button"
-              onclick={() => {
-                messagingContext = { type: 'ENQUIRY', id: String(selectedEnquiry.id), label: selectedEnquiry.sender_name };
-                showMessagingModal = true;
-              }}
-              class="px-2 py-1 rounded-lg bg-warm-100 hover:bg-warm-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium transition flex items-center gap-1 shrink-0"
-              title="Dispatch internal command directive for this inquiry">
-              <Icon name="message-square" size={13} class="text-orange-600 dark:text-orange-400" />
-              <span class="hidden sm:inline">Directive</span>
-            </button>
-
-            <!-- Close Inspector on Board View to show all 5 stages -->
-            {#if viewMode === 'board'}
-              <button
-                type="button"
-                onclick={() => boardInspectorOpen = false}
-                class="p-1 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-warm-200/80 dark:hover:bg-slate-800 transition flex items-center gap-1 shrink-0 ml-0.5"
-                title="Close detail panel and show all 5 stages (Esc)">
-                <Icon name="x" size={16} />
-              </button>
-            {/if}
+            <!-- Right side: Timestamp -->
+            <div class="text-right text-[10.5px] text-slate-400 shrink-0 font-mono">
+              <span>Received: {selectedEnquiry.received_at}</span>
+            </div>
           </div>
         </div>
 
         <!-- Inspector Content Body (FIT IN ONE PAGE, ZERO SCROLL EXCEPT MESSAGE BODIES) -->
-        <div class="flex-1 flex flex-col min-h-0 p-3.5 gap-2 overflow-hidden text-xs">
+        <div class="flex-1 flex flex-col min-h-0 p-3 gap-2 overflow-hidden text-xs">
 
-          <!-- SLA Policy & Pacing Card (shrink-0) -->
-          <div class="bg-warm-50 dark:bg-slate-900 p-2.5 rounded-lg border border-warm-200 dark:border-slate-800 flex items-center justify-between text-xs shrink-0">
+          <!-- SLA Policy & Pacing Card (shrink-0, compact height) -->
+          <div class="bg-warm-50 dark:bg-slate-900 px-2.5 py-1.5 rounded-lg border border-warm-200 dark:border-slate-800 flex items-center justify-between text-xs shrink-0">
             <div>
-              <span class="text-slate-500 text-[11px]">48-Hour SLA Status:</span>
-              <div class="flex items-center gap-2 mt-0.5">
+              <div class="flex items-center gap-2">
+                <span class="text-slate-500 text-[10.5px]">48-Hour SLA:</span>
                 {#if selectedEnquiry.first_response_at}
                   <span class="font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5 text-xs">
                     <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
@@ -2013,7 +2018,7 @@
             <!-- Scrollable Multi-Turn Message Stream -->
             <div
               bind:this={chatScrollContainer}
-              class="flex-1 min-h-[120px] max-h-[220px] lg:max-h-[260px] overflow-y-auto overscroll-contain p-2.5 rounded-lg border border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-950/60 space-y-2 text-xs">
+              class="flex-1 min-h-[160px] max-h-[380px] lg:max-h-[440px] 2xl:max-h-[500px] overflow-y-auto overscroll-contain p-2.5 rounded-lg border border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-950/60 space-y-2 text-xs">
               {#if activeThreadMessages.length === 0}
                 <div class="text-center py-6 text-slate-400 text-xs">
                   No conversation messages recorded yet.
@@ -2093,12 +2098,12 @@
             </div>
           </div>
 
-          <!-- AI Dialect-Matched Reply Composer (Expanded Height with Tone & 3-Dialect Cycle) -->
+          <!-- AI Dialect-Matched Reply Composer -->
           <div class="shrink-0 flex flex-col gap-1.5 pt-1">
-            <div class="flex flex-wrap items-center justify-between gap-1.5 shrink-0">
+            <div class="flex items-center justify-between gap-1.5 shrink-0">
               <!-- Left: Title & Tone Selector -->
-              <div class="flex items-center gap-1.5">
-                <span class="text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+              <div class="flex items-center gap-1.5 min-w-0">
+                <span class="text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider shrink-0">
                   Suggested Reply
                 </span>
 
@@ -2119,39 +2124,26 @@
                 </div>
               </div>
 
-              <!-- Right: 3-Way Dialect Switcher (Cycle Button + Quick Pills) -->
-              <div class="flex items-center gap-1 text-[10px]">
+              <!-- Right: Dialect Pills Only in Same Row (বাংলা | Banglish | EN) -->
+              <div class="inline-flex rounded-md bg-warm-100 dark:bg-slate-800 p-0.5 font-mono text-[9.5px] shrink-0">
                 <button
                   type="button"
-                  onclick={cycleDialect}
-                  class="font-semibold text-orange-600 dark:text-orange-400 hover:underline flex items-center gap-1 mr-1"
-                  title="Cycle between বাংলা, Banglish, and English">
-                  <svg class="w-3 h-3 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  <span>Switch Dialect</span>
+                  onclick={() => applyDialectAndTone('bn')}
+                  class={`px-2 py-0.5 rounded transition ${currentDialect === 'bn' ? 'bg-orange-600 text-white font-bold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+                  বাংলা
                 </button>
-
-                <div class="inline-flex rounded-md bg-warm-100 dark:bg-slate-800 p-0.5 font-mono text-[9.5px]">
-                  <button
-                    type="button"
-                    onclick={() => applyDialectAndTone('bn')}
-                    class={`px-1.5 py-0.2 rounded transition ${currentDialect === 'bn' ? 'bg-orange-600 text-white font-bold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
-                    বাংলা
-                  </button>
-                  <button
-                    type="button"
-                    onclick={() => applyDialectAndTone('banglish')}
-                    class={`px-1.5 py-0.2 rounded transition ${currentDialect === 'banglish' ? 'bg-orange-600 text-white font-bold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
-                    Banglish
-                  </button>
-                  <button
-                    type="button"
-                    onclick={() => applyDialectAndTone('en')}
-                    class={`px-1.5 py-0.2 rounded transition ${currentDialect === 'en' ? 'bg-orange-600 text-white font-bold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
-                    EN
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onclick={() => applyDialectAndTone('banglish')}
+                  class={`px-2 py-0.5 rounded transition ${currentDialect === 'banglish' ? 'bg-orange-600 text-white font-bold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+                  Banglish
+                </button>
+                <button
+                  type="button"
+                  onclick={() => applyDialectAndTone('en')}
+                  class={`px-2 py-0.5 rounded transition ${currentDialect === 'en' ? 'bg-orange-600 text-white font-bold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+                  EN
+                </button>
               </div>
             </div>
 
