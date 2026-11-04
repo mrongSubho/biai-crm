@@ -5,6 +5,7 @@ import { detectDialect } from '../src/lib/engine/dialect';
 import { analyzeMessageTriage } from '../src/lib/engine/triage';
 import { calculateSlaStatus } from '../src/lib/engine/sla';
 import { parseWithAiOrFallback } from '../src/server/ai/parser';
+import { getTriDialectReplies } from '../src/lib/engine/replies';
 
 describe('Bangladesh E.164 Phone Normalizer', () => {
   it('normalizes standard 11-digit local format', () => {
@@ -268,5 +269,19 @@ describe('Omnichannel Multi-Turn Inbound Follow-ups', () => {
     const text = 'Amader company theke aro 10 jon software engineer add korte chai. Group discount kibhabe pabo?';
     const dialect = detectDialect(text);
     expect(dialect.language).toBe('BANGLISH');
+  });
+
+  it('generates tri-dialect replies across Bangla, Banglish, and English with tones', () => {
+    const res = getTriDialectReplies({
+      senderName: 'Tahmina Akter',
+      detectedLanguage: 'BN_SCRIPT',
+      programIntent: 'Fellowship',
+      triageCategory: 'SALES_LEAD',
+      messageContent: 'ফেলোশিপ প্রোগ্রামে ভর্তি হতে চাই'
+    }, 'Professional');
+
+    expect(res.bn).toContain('আসসালামু আলাইকুম');
+    expect(res.banglish).toContain('admission');
+    expect(res.en).toContain('Fellowship');
   });
 });

@@ -9,7 +9,7 @@
   import MessagingCenterModal from '../lib/ui/MessagingCenterModal.svelte';
   import Icon from '../lib/ui/Icon.svelte';
   import { detectDialect } from '../lib/engine/dialect';
-  import { generateSuggestedReplies } from '../lib/engine/replies';
+  import { generateSuggestedReplies, getTriDialectReplies, type TonePreset } from '../lib/engine/replies';
   import type { ExtractionResult, PipelineStage, Channel } from '../lib/types/crm';
 
   // --- THEME & VIEWPORT STATE ---
@@ -88,6 +88,21 @@
   let simulateInputText = $state('');
   let simulateChannel = $state<Channel>('WhatsApp');
   let lastSyncedId = $state<number | null>(null);
+
+  // Tone & Dialect Switching State
+  let activeTone = $state<TonePreset>('Professional');
+  let currentDialect = $state<'bn' | 'banglish' | 'en'>('banglish');
+  const tonePresets: TonePreset[] = ['Professional', 'Friendly', 'Direct', 'Executive'];
+
+  // Internal Chat Notes State
+  let showNoteDrawer = $state(false);
+  let newNoteText = $state('');
+  const noteQuickTags = [
+    '📞 Call Summary',
+    '💰 Discount Promised',
+    '⏳ Awaiting Payment',
+    '📅 Follow-up Required'
+  ];
 
   const simulationPresets = [
     {
@@ -396,10 +411,86 @@
   $effect(() => {
     if (selectedEnquiry && selectedEnquiry.id !== lastSyncedId) {
       lastSyncedId = selectedEnquiry.id;
-      editableReply = selectedEnquiry.suggested_reply || '';
+      const lang = selectedEnquiry.detected_language || selectedEnquiry.language;
+      if (lang === 'BN_SCRIPT') {
+        currentDialect = 'bn';
+      } else if (lang === 'EN') {
+        currentDialect = 'en';
+      } else {
+        currentDialect = 'banglish';
+      }
+      applyDialectAndTone(currentDialect, activeTone);
       scrollChatToBottom(false);
     }
   });
+
+  function applyDialectAndTone(newDialect?: 'bn' | 'banglish' | 'en', newTone?: TonePreset) {
+    if (newDialect) currentDialect = newDialect;
+    if (newTone) activeTone = newTone;
+    if (!selectedEnquiry) return;
+
+    const tri = getTriDialectReplies({
+      senderName: selectedEnquiry.sender_name || 'Customer',
+      detectedLanguage: selectedEnquiry.detected_language || selectedEnquiry.language || 'BANGLISH',
+      programIntent: selectedEnquiry.program_intent || 'Bootcamp',
+      triageCategory: selectedEnquiry.triage_category || 'SALES_LEAD',
+      normalizedPhone: selectedEnquiry.normalized_phone,
+      seats: selectedEnquiry.seats || 1,
+      messageContent: selectedEnquiry.message || selectedEnquiry.raw_message || ''
+    }, activeTone);
+
+    if (currentDialect === 'bn') {
+      editableReply = tri.bn;
+    } else if (currentDialect === 'banglish') {
+      editableReply = tri.banglish;
+    } else {
+      editableReply = tri.en;
+    }
+  }
+
+  function cycleDialect() {
+    if (currentDialect === 'bn') {
+      currentDialect = 'banglish';
+    } else if (currentDialect === 'banglish') {
+      currentDialect = 'en';
+    } else {
+      currentDialect = 'bn';
+    }
+    applyDialectAndTone();
+    soundFx.playWarningPing();
+    showFeedback(`Switched dialect to ${currentDialect === 'bn' ? 'বাংলা' : currentDialect === 'banglish' ? 'Banglish' : 'English'}`);
+  }
+
+  function saveInternalNote() {
+    if (!newNoteText.trim() || !selectedEnquiry) return;
+    const key = getThreadKey(selectedEnquiry);
+    const nowIso = new Date().toISOString();
+    const newNote: ConversationItem = {
+      id: `note_${Date.now()}`,
+      enquiryId: selectedEnquiry.id,
+      direction: 'INTERNAL_NOTE',
+      channel: 'Phone call note',
+      senderName: `${currentUser?.full_name || 'Staff'} (Internal Memo)`,
+      content: newNoteText.trim(),
+      timestamp: nowIso,
+      deliveryStatus: 'RECEIVED'
+    };
+
+    threadMessagesMap[key] = [...(threadMessagesMap[key] || []), newNote];
+    newNoteText = '';
+    showNoteDrawer = false;
+    soundFx.playActionSuccess();
+    showFeedback('Internal staff note added to conversation thread.');
+    scrollChatToBottom(true);
+
+    // Persist to D1 in background
+    fetch(`/api/v1/enquiries/${selectedEnquiry.id}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      credentials: 'include',
+      body: JSON.stringify({ newStatus: selectedEnquiry.ticket_status || 'OPEN', notes: newNote.content })
+    }).catch(e => console.log('Local action cached', e));
+  }
 
   // --- OMNICHANNEL CONVERSATION THREAD ENGINE ---
   function getThreadKey(enquiry: any): string {
@@ -436,7 +527,9 @@
         deliveryStatus: 'RECEIVED'
       });
 
-      if (item.outbound_reply && item.first_response_at) {
+      // Avoid duplicate outbound turns: if threadMessagesMap[key] already contains an outbound for this enquiry, do not duplicate
+      const sessionOutbounds = (threadMessagesMap[key] || []).filter(m => m.direction === 'OUTBOUND' && m.enquiryId === item.id);
+      if (item.outbound_reply && item.first_response_at && sessionOutbounds.length === 0) {
         baseItems.push({
           id: `out_base_${item.id}`,
           enquiryId: item.id,
@@ -560,7 +653,7 @@
       if (e.id === id) {
         return {
           ...e,
-          first_response_at: nowIso,
+          first_response_at: e.first_response_at || nowIso,
           pipeline_stage: 'Contacted' as PipelineStage,
           reply_status: 'SENT',
           outbound_reply: textToSend
@@ -572,7 +665,7 @@
     if (selectedEnquiry) {
       const key = getThreadKey(selectedEnquiry);
       const newMsg: ConversationItem = {
-        id: `out_${Date.now()}`,
+        id: `out_${id}_${Date.now()}`,
         enquiryId: id,
         direction: 'OUTBOUND',
         channel: selectedEnquiry.channel,
@@ -1387,7 +1480,7 @@
     <!-- PANE 2: CONVERSATION STREAM OR KANBAN BOARD            -->
     <!-- ------------------------------------------------------ -->
     {#if viewMode === 'inbox'}
-      <section class="w-full lg:w-[380px] xl:w-[420px] border-r border-warm-200 dark:border-slate-800 bg-warm-50 dark:bg-slate-950 flex flex-col shrink-0 min-h-0 overflow-hidden">
+      <section class="flex-1 min-w-[320px] border-r border-warm-200 dark:border-slate-800 bg-warm-50 dark:bg-slate-950 flex flex-col min-h-0 overflow-hidden">
         <!-- Stream Header with View Toggle -->
         <div class="h-10 border-b border-warm-200 dark:border-slate-800 px-3.5 flex items-center justify-between bg-white dark:bg-slate-900 text-xs shrink-0">
           <div class="flex items-center gap-2 text-slate-500">
@@ -1651,21 +1744,21 @@
     <!-- (FIT IN ONE PAGE, ZERO SCROLL EXCEPT MESSAGE BODIES)  -->
     <!-- ------------------------------------------------------ -->
     {#if viewMode === 'inbox' || boardInspectorOpen}
-      <main class={`detail-panel ${viewMode === 'board' ? 'w-full md:w-[420px] lg:w-[450px] xl:w-[480px] shrink-0 border-l border-warm-200 dark:border-slate-800 shadow-xl z-20' : 'flex-1'} bg-white dark:bg-slate-900 flex flex-col h-full min-h-0 overflow-hidden`}>
+      <main class="detail-panel w-full lg:w-[500px] xl:w-[540px] 2xl:w-[580px] shrink-0 border-l border-warm-200 dark:border-slate-800 shadow-xl z-20 bg-white dark:bg-slate-900 flex flex-col h-full min-h-0 overflow-hidden">
         {#if !selectedEnquiry}
           <div class="m-auto text-center py-20 text-slate-400 text-sm">
             Select an inquiry from the stream to inspect.
           </div>
         {:else}
         <!-- Inspector Top Header: Contact Identity & Actions (shrink-0) -->
-        <div class="p-3.5 border-b border-warm-200 dark:border-slate-800 flex items-start justify-between gap-3 bg-warm-50/50 dark:bg-slate-900/60 shrink-0">
-          <div>
-            <div class="flex items-center gap-2">
+        <div class="p-3.5 border-b border-warm-200 dark:border-slate-800 flex items-start justify-between gap-2.5 bg-warm-50/50 dark:bg-slate-900/60 shrink-0">
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-1.5">
               <h2 class="text-base font-bold text-slate-900 dark:text-white truncate">
                 {selectedEnquiry.sender_name}
               </h2>
 
-              <span class={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider shrink-0 ${
+              <span class={`text-[9.5px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0 ${
                 selectedEnquiry.businessPriority === 'P0'
                   ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
                   : 'bg-warm-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
@@ -1682,7 +1775,7 @@
             {/if}
 
             <!-- Contact Metadata Row -->
-            <div class="flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-slate-400 mt-1.5 font-mono tabular-nums">
+            <div class="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mt-1 font-mono tabular-nums">
               <span class="flex items-center gap-1">
                 <span>Channel:</span>
                 <span class="font-semibold text-slate-800 dark:text-slate-200">{selectedEnquiry.channel}</span>
@@ -1697,7 +1790,7 @@
                   <button
                     type="button"
                     onclick={() => copyToClipboard(selectedEnquiry.normalized_phone || selectedEnquiry.phone, 'Phone number')}
-                    class="text-orange-600 hover:text-orange-700 ml-1 inline-flex items-center"
+                    class="text-orange-600 hover:text-orange-700 ml-0.5 inline-flex items-center"
                     title="Copy normalized phone number">
                     <Icon name="copy" size={12} />
                   </button>
@@ -1705,19 +1798,19 @@
               {:else}
                 <span class="text-amber-600 font-sans text-[11px] inline-flex items-center gap-1">
                   <Icon name="phone-off" size={12} />
-                  <span>Missing Phone (Ask in reply)</span>
+                  <span>Missing Phone</span>
                 </span>
               {/if}
 
               <span>·</span>
-              <span>Received: {selectedEnquiry.received_at}</span>
+              <span class="text-[11px]">Received: {selectedEnquiry.received_at}</span>
             </div>
           </div>
 
-          <!-- Pipeline Stage Selector Dropdown -->
-          <div class="flex items-center gap-2 shrink-0">
+          <!-- Pipeline Stage Selector Dropdown & Directive -->
+          <div class="flex items-center gap-1.5 shrink-0 ml-auto">
             {#if (selectedEnquiry as any).ticket_status && (selectedEnquiry as any).ticket_status !== 'OPEN'}
-              <span class="text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase tracking-wider bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+              <span class="text-[9.5px] font-mono px-1.5 py-0.5 rounded font-bold uppercase tracking-wider bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
                 {(selectedEnquiry as any).ticket_status}
               </span>
             {/if}
@@ -1739,7 +1832,7 @@
                 messagingContext = { type: 'ENQUIRY', id: String(selectedEnquiry.id), label: selectedEnquiry.sender_name };
                 showMessagingModal = true;
               }}
-              class="px-2.5 py-1 rounded-lg bg-warm-100 hover:bg-warm-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium transition flex items-center gap-1.5 shrink-0"
+              class="px-2 py-1 rounded-lg bg-warm-100 hover:bg-warm-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium transition flex items-center gap-1 shrink-0"
               title="Dispatch internal command directive for this inquiry">
               <Icon name="message-square" size={13} class="text-orange-600 dark:text-orange-400" />
               <span class="hidden sm:inline">Directive</span>
@@ -1759,7 +1852,7 @@
         </div>
 
         <!-- Inspector Content Body (FIT IN ONE PAGE, ZERO SCROLL EXCEPT MESSAGE BODIES) -->
-        <div class="flex-1 flex flex-col min-h-0 p-3.5 gap-2.5 overflow-hidden text-xs">
+        <div class="flex-1 flex flex-col min-h-0 p-3.5 gap-2 overflow-hidden text-xs">
 
           <!-- SLA Policy & Pacing Card (shrink-0) -->
           <div class="bg-warm-50 dark:bg-slate-900 p-2.5 rounded-lg border border-warm-200 dark:border-slate-800 flex items-center justify-between text-xs shrink-0">
@@ -1798,7 +1891,7 @@
 
           <!-- Omnichannel Conversation Stream Container (Takes available flex height) -->
           <div class="flex-1 flex flex-col min-h-0 gap-1.5 overflow-hidden">
-            <!-- Stream Subheader with Turns Summary & Simulate Action -->
+            <!-- Stream Subheader with Turns Summary & Action Buttons -->
             <div class="flex items-center justify-between shrink-0">
               <div class="flex items-center gap-1.5">
                 <span class="text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1">
@@ -1812,16 +1905,97 @@
                 </span>
               </div>
 
-              <button
-                type="button"
-                onclick={() => { showSimulateModal = true; simulateChannel = selectedEnquiry.channel; }}
-                class="text-[10px] font-semibold text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-950/50 hover:bg-orange-100 dark:hover:bg-orange-900/60 border border-orange-200 dark:border-orange-800/80 px-2 py-0.5 rounded-md flex items-center gap-1 transition">
-                <svg class="w-3 h-3 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                </svg>
-                <span>+ Simulate Follow-up</span>
-              </button>
+              <div class="flex items-center gap-1.5">
+                <!-- Smart Take Note Button -->
+                <button
+                  type="button"
+                  onclick={() => showNoteDrawer = !showNoteDrawer}
+                  class={`text-[10px] font-semibold px-2 py-0.5 rounded-md flex items-center gap-1 transition border ${
+                    showNoteDrawer
+                      ? 'bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700'
+                      : 'text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 border-amber-200 dark:border-amber-800/80'
+                  }`}>
+                  <svg class="w-3 h-3 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                  <span>{showNoteDrawer ? 'Close Note' : '📝 + Note'}</span>
+                </button>
+
+                <!-- Simulate Follow-up Button -->
+                <button
+                  type="button"
+                  onclick={() => { showSimulateModal = true; simulateChannel = selectedEnquiry.channel; }}
+                  class="text-[10px] font-semibold text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-950/50 hover:bg-orange-100 dark:hover:bg-orange-900/60 border border-orange-200 dark:border-orange-800/80 px-2 py-0.5 rounded-md flex items-center gap-1 transition">
+                  <svg class="w-3 h-3 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span>+ Simulate Follow-up</span>
+                </button>
+              </div>
             </div>
+
+            <!-- Smart Internal Notepad Box (Collapsible) -->
+            {#if showNoteDrawer}
+              <div class="shrink-0 bg-amber-50/95 dark:bg-amber-950/50 border border-amber-300/90 dark:border-amber-700/80 rounded-xl p-2.5 shadow-xs space-y-2 animate-in fade-in slide-in-from-top-1 duration-150">
+                <div class="flex items-center justify-between text-amber-900 dark:text-amber-200 border-b border-amber-200/80 dark:border-amber-800/70 pb-1">
+                  <div class="flex items-center gap-1.5 font-bold text-xs">
+                    <span>📝 Internal Staff Notepad</span>
+                    <span class="text-[10px] font-normal text-amber-700 dark:text-amber-400">• Team only (Not sent to customer)</span>
+                  </div>
+                  <button
+                    type="button"
+                    onclick={() => showNoteDrawer = false}
+                    class="text-amber-700 hover:text-amber-950 dark:text-amber-400 dark:hover:text-white text-xs leading-none">✕</button>
+                </div>
+
+                <!-- Quick Category Tag Chips -->
+                <div class="flex flex-wrap items-center gap-1 text-[10px]">
+                  <span class="text-amber-800 dark:text-amber-400 font-semibold mr-0.5">Quick Tags:</span>
+                  {#each noteQuickTags as tag}
+                    <button
+                      type="button"
+                      onclick={() => {
+                        const prefix = `[${tag.replace(/^[^\w\s]+/, '').trim()}]: `;
+                        if (!newNoteText.includes(prefix)) {
+                          newNoteText = prefix + newNoteText;
+                        }
+                      }}
+                      class="px-1.5 py-0.5 rounded bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/40 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-200 transition">
+                      {tag}
+                    </button>
+                  {/each}
+                </div>
+
+                <!-- Notepad Textarea -->
+                <textarea
+                  bind:value={newNoteText}
+                  rows="2"
+                  onkeydown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') saveInternalNote(); }}
+                  placeholder="Jot down phone call outcome, promised discount, or supervisor instruction... (⌘+Enter to save)"
+                  class="w-full text-xs p-2 rounded-lg border border-amber-300 dark:border-amber-700/80 bg-white/90 dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-amber-500 font-sans"></textarea>
+
+                <div class="flex items-center justify-between pt-0.5">
+                  <span class="text-[10px] text-amber-700 dark:text-amber-400 font-mono">
+                    Author: {currentUser?.full_name || 'Staff'}
+                  </span>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onclick={() => { showNoteDrawer = false; newNoteText = ''; }}
+                      class="text-[11px] text-slate-500 hover:text-slate-700 dark:text-slate-400 px-2 py-1">
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!newNoteText.trim()}
+                      onclick={saveInternalNote}
+                      class="text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white px-3 py-1 rounded-lg shadow-2xs transition disabled:opacity-40 flex items-center gap-1">
+                      <span>💾 Save Note to Thread</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            {/if}
 
             <!-- AI Multi-Turn Thread Digest (Visible when multi-turn) -->
             {#if aiThreadDigest && aiThreadDigest.isMultiTurn}
@@ -1839,7 +2013,7 @@
             <!-- Scrollable Multi-Turn Message Stream -->
             <div
               bind:this={chatScrollContainer}
-              class="flex-1 min-h-[140px] max-h-[250px] lg:max-h-[290px] overflow-y-auto overscroll-contain p-2.5 rounded-lg border border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-950/60 space-y-2.5 text-xs">
+              class="flex-1 min-h-[120px] max-h-[220px] lg:max-h-[260px] overflow-y-auto overscroll-contain p-2.5 rounded-lg border border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-950/60 space-y-2 text-xs">
               {#if activeThreadMessages.length === 0}
                 <div class="text-center py-6 text-slate-400 text-xs">
                   No conversation messages recorded yet.
@@ -1847,16 +2021,17 @@
               {:else}
                 {#each activeThreadMessages as msg (msg.id)}
                   {#if msg.direction === 'INTERNAL_NOTE'}
-                    <!-- Internal Call Note (Centered memo card) -->
+                    <!-- Internal Staff Call / Discussion Note (Centered memo card) -->
                     <div class="flex justify-center my-1">
-                      <div class="max-w-[90%] bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800/60 rounded-lg p-2 text-amber-900 dark:text-amber-200 text-[11px] shadow-2xs">
-                        <div class="flex items-center gap-1 font-semibold text-[10px] text-amber-700 dark:text-amber-400 mb-0.5">
-                          <span>📞 Internal Phone Call Note</span>
-                          <span>•</span>
+                      <div class="max-w-[92%] bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800/60 rounded-xl p-2.5 text-amber-900 dark:text-amber-200 text-xs shadow-2xs">
+                        <div class="flex items-center justify-between text-[10px] text-amber-700 dark:text-amber-400 font-semibold border-b border-amber-200/70 dark:border-amber-800/60 pb-1 mb-1">
+                          <span class="flex items-center gap-1">
+                            <span>📝 {msg.senderName}</span>
+                          </span>
                           <span class="font-mono text-[9px]">{msg.timestamp.slice(11, 16) || msg.timestamp}</span>
                         </div>
-                        <div class="italic">
-                          "{msg.content}"
+                        <div class="leading-relaxed font-sans whitespace-pre-line text-[11.5px]">
+                          {msg.content}
                         </div>
                       </div>
                     </div>
@@ -1918,33 +2093,74 @@
             </div>
           </div>
 
-          <!-- AI Dialect-Matched Reply Composer (shrink-0 with controlled height) -->
+          <!-- AI Dialect-Matched Reply Composer (Expanded Height with Tone & 3-Dialect Cycle) -->
           <div class="shrink-0 flex flex-col gap-1.5 pt-1">
-            <div class="flex items-center justify-between shrink-0">
-              <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center justify-between gap-1.5 shrink-0">
+              <!-- Left: Title & Tone Selector -->
+              <div class="flex items-center gap-1.5">
                 <span class="text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  Dialect-Matched Suggested Reply
+                  Suggested Reply
                 </span>
-                <span class="text-[9px] font-mono bg-orange-100 text-orange-800 dark:bg-orange-950/60 dark:text-orange-300 px-1.5 py-0.2 rounded">
-                  Tone: Respectful Professional
-                </span>
+
+                <!-- Interactive Tone Selector -->
+                <div class="flex items-center gap-0.5 bg-warm-100 dark:bg-slate-800 p-0.5 rounded-md text-[10px]">
+                  {#each tonePresets as t}
+                    <button
+                      type="button"
+                      onclick={() => applyDialectAndTone(currentDialect, t)}
+                      class={`px-1.5 py-0.2 rounded font-medium transition ${
+                        activeTone === t
+                          ? 'bg-orange-600 text-white shadow-xs font-semibold'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}>
+                      {t}
+                    </button>
+                  {/each}
+                </div>
               </div>
 
-              {#if selectedEnquiry.suggested_reply_alt}
+              <!-- Right: 3-Way Dialect Switcher (Cycle Button + Quick Pills) -->
+              <div class="flex items-center gap-1 text-[10px]">
                 <button
                   type="button"
-                  onclick={() => editableReply = selectedEnquiry.suggested_reply_alt}
-                  class="text-[11px] text-orange-600 hover:underline">
-                  Switch to Alt Dialect
+                  onclick={cycleDialect}
+                  class="font-semibold text-orange-600 dark:text-orange-400 hover:underline flex items-center gap-1 mr-1"
+                  title="Cycle between বাংলা, Banglish, and English">
+                  <svg class="w-3 h-3 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Switch Dialect</span>
                 </button>
-              {/if}
+
+                <div class="inline-flex rounded-md bg-warm-100 dark:bg-slate-800 p-0.5 font-mono text-[9.5px]">
+                  <button
+                    type="button"
+                    onclick={() => applyDialectAndTone('bn')}
+                    class={`px-1.5 py-0.2 rounded transition ${currentDialect === 'bn' ? 'bg-orange-600 text-white font-bold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+                    বাংলা
+                  </button>
+                  <button
+                    type="button"
+                    onclick={() => applyDialectAndTone('banglish')}
+                    class={`px-1.5 py-0.2 rounded transition ${currentDialect === 'banglish' ? 'bg-orange-600 text-white font-bold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+                    Banglish
+                  </button>
+                  <button
+                    type="button"
+                    onclick={() => applyDialectAndTone('en')}
+                    class={`px-1.5 py-0.2 rounded transition ${currentDialect === 'en' ? 'bg-orange-600 text-white font-bold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+                    EN
+                  </button>
+                </div>
+              </div>
             </div>
 
+            <!-- Expanded Height Suggested Reply Textarea -->
             <textarea
               bind:value={editableReply}
-              rows="2"
-              class="w-full resize-none overflow-y-auto overscroll-contain text-xs p-2.5 rounded-lg border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-bengali leading-relaxed focus:outline-none focus:ring-1 focus:ring-orange-600 max-h-20"
-              placeholder="Draft your reply..."></textarea>
+              rows="4"
+              class="w-full resize-none overflow-y-auto overscroll-contain text-xs p-2.5 rounded-lg border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-bengali leading-relaxed focus:outline-none focus:ring-1 focus:ring-orange-600 min-h-[100px] lg:min-h-[112px] max-h-[140px]"
+              placeholder="Draft your reply in {currentDialect === 'bn' ? 'বাংলা' : currentDialect === 'banglish' ? 'Banglish' : 'English'}..."></textarea>
 
             <!-- Reply Actions (Pinned at bottom, shrink-0) -->
             <div class="flex items-center justify-between shrink-0 pt-0.5">
@@ -1985,15 +2201,15 @@
           </div>
 
           <!-- Audit Log Trail (shrink-0, compact at bottom) -->
-          <div class="shrink-0 pt-2 border-t border-warm-200 dark:border-slate-800 text-[10px]">
-            <span class="font-semibold text-slate-400 uppercase tracking-wider block mb-1">
-              Record Audit Lineage
-            </span>
-            <div class="font-mono tabular-nums text-slate-500 space-y-0.5 leading-tight">
-              <div>• [{selectedEnquiry.received_at}] Ingestion via {selectedEnquiry.channel} webhook (ID: {selectedEnquiry.id})</div>
-              <div>• [{selectedEnquiry.received_at}] Triaged to {selectedEnquiry.triage_category} (Priority: {selectedEnquiry.businessPriority})</div>
+          <div class="shrink-0 pt-1.5 border-t border-warm-200 dark:border-slate-800 text-[9.5px]">
+            <div class="flex items-center justify-between text-slate-400 font-semibold uppercase tracking-wider mb-0.5">
+              <span>Record Audit Lineage</span>
+              <span class="font-mono text-[9px] lowercase">id: {selectedEnquiry.id}</span>
+            </div>
+            <div class="font-mono tabular-nums text-slate-500 space-y-0.5 leading-tight truncate">
+              <div class="truncate">• [{selectedEnquiry.received_at}] Ingestion via {selectedEnquiry.channel} webhook</div>
               {#if selectedEnquiry.first_response_at}
-                <div class="text-emerald-600 dark:text-emerald-400">• [{selectedEnquiry.first_response_at.slice(0, 16)}] First outbound response approved (Stage: Contacted)</div>
+                <div class="text-emerald-600 dark:text-emerald-400 truncate">• [{selectedEnquiry.first_response_at.slice(0, 16)}] First outbound response approved</div>
               {/if}
             </div>
           </div>
