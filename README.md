@@ -1,31 +1,73 @@
-# BIAI Omnichannel Multilingual CRM & AI Triage Engine
-
 Production-grade, edge-native CRM and AI Ingestion Engine engineered for the **BIAI AI Intern Assessment (Task 1)**.
 
-Deployed on **Cloudflare Workers (Edge V8 Isolates) + Cloudflare D1 (Distributed SQLite) + Svelte 5 (Runes)**.
+# BIAI CRM Triage — Project Submission Note
+
+**Candidate:** Subho Mrong  
+**Submission Date:** 5 November 2026  
+**Live Application:** [https://biaicrm.mrong.tech](https://biaicrm.mrong.tech)  
+**Code Repository:** [https://github.com/mrongSubho/biai-crm](https://github.com/mrongSubho/biai-crm)  
+**Walkthrough Video (4.5 min):** [Loom Video URL]
 
 ---
 
-## 🌟 Key Features
+### Tech Stack & Architecture Choices
 
-1. **Omnichannel Ingestion:** Ingests messages from WhatsApp, Facebook Messenger, Website forms, Phone call notes, and Facebook comments.
-2. **Bangladesh E.164 Phone Normalization:** Strict formatting of all BD phone numbers (`017...`, `88018...`, `+88019...`) into canonical E.164 (`+8801XXXXXXXXX`).
-3. **Automated Entity Resolution:** Identifies repeat senders across multiple timestamps. Resolves **Rafi Ahmed (`01711000001`)** on Oct 26 (`#1`) and Oct 27 (`#12`) into a unified thread and flags him as a **Repeat Chaser (2x Unanswered)**.
-4. **5-Tier Operational Triage Matrix:**
-   - `SALES_LEAD`: 16 active leads managed on a 5-stage pipeline (`New` $\to$ `Contacted` $\to$ `Interested` $\to$ `Paid` / `Lost`).
-   - `CRITICAL_ESCALATION`: P0 PR-Risk detection for refund threats (Habibur Rahman `#16`).
-   - `SUPPORT_BILLING`: bKash payment verification for unconfirmed transactions (Farzana Rahman `#7`).
-   - `CAREERS_HR`: Intern applicant inquiry routing (Arif Hossain `#20`).
-   - `SPAM_SECURITY`: Automated crypto phishing quarantine (Earn Crypto Daily `#11`).
-5. **Dialect-Matched Linguistic Reply Drafter:** Accurately classifies Bengali Unicode script, Romanized Banglish phonetics, and English with confidence scoring. Generates tone-matched replies grounded in BIAI's course catalog across 4 tones (`Professional`, `Friendly`, `Direct`, `Executive`) and 3 dialects (`বাংলা`, `Banglish`, `EN`).
-6. **Conversation Stream & Multi-Turn History:** End-to-end conversational dialogue rendering customer inquiries and outbound admissions agent turns, complete with follow-up simulation, internal note taking, and double-send protection.
-7. **48-Hour SLA State Machine:** Dynamic countdown tracking with `IN_SLA`, `AT_RISK` ($<12\text{h}$), and clean positive overdue duration timers (`1h 55m overdue`), accompanied by a test simulation clock for evaluator verification.
-8. **Weekly Executive AI Digest Center Stage:** Dedicated Saturday 00:00 to Friday 23:59 business week executive briefing reporting channel breakdown, 3.17M BDT pipeline value, 175 corporate seats requested, and missing phone leakage alerts.
-9. **Account Control & Session Security Plane:** Hierarchical 4-tier RBAC (`TIER_0` to `TIER_3`), CSRF double-submit token protection on session revocation, real-time client machine platform detection (replacing static proxy names), and real-time CRM operational activity logging.
+* **Runtime:** Cloudflare Workers (Edge V8 Isolates)
+* **BACKEND & CONTROL:** Hono v4
+* **Database:** Cloudflare D1 (Distributed Edge SQLite)
+* **Frontend:** Svelte 5 (Runes)
+
+**Why this stack:**
+* **Instant local performance:** Cloudflare Workers execute directly at Cloudflare’s Dhaka edge node, avoiding the high latency and cold-start delays common with traditional servers.
+* **Zero-maintenance relational storage:** Cloudflare D1 provides lightweight, ACID-compliant SQLite at the edge—guaranteeing consistent lead status transitions, full message histories, and zero server management overhead.
+* **Ultra-lean UI:** Svelte 5 compiles down to raw JavaScript (<80 KB gzipped) without the virtual-DOM overhead of React, keeping the dashboard snappy even on patchy mobile data.
 
 ---
 
-## 🚀 Quick Start (Local Development)
+### 1. What I Built and Why
+
+In Bangladesh, prospective students and corporate buyers don't fill out tidy web forms. They send mixed Banglish questions on Messenger or WhatsApp, drop quick comments on Facebook posts, or call directly. Many leads get delayed, repeat inquiries get missed, and critical refund requests can get buried in a busy inbox.
+
+I built this CRM to solve those exact daily headaches for the BIAI team:
+
+* **One Unified Inbox for Every Channel**: Ingests incoming inquiries from WhatsApp, Facebook Messenger, Facebook comments, website forms, and phone call notes into a single shared inbox.
+* **Smart Triage that Cuts Through the Noise**: Instantly categorizes inbound messages into active sales leads, support/billing, or spam. It flags critical risks (like public refund threats) for priority de-escalation and surfaces repeat reach-outs (e.g. recognizing Rafi Ahmed followed up twice) so hot leads never go cold.
+* **Human-Ready Conversation Stream**: Counselors can view the full back-and-forth dialogue, take internal scratchpad notes (`+ Note`) attached to the lead, and draft replies with a single click.
+* **Natural Language & Dialect Matching**: Suggested replies adapt to how the customer writes—switching seamlessly between **Bangla**, **Banglish**, and **English**, with tone presets (**Professional**, **Friendly**, **Direct**, or **Executive**).
+* **48-Hour Response SLA Tracker**: Clear countdowns show exactly how much time is left to reply—or how long a message is overdue in plain hours and minutes.
+* **Weekly Executive Summary**: A dedicated report that gives management a bird's-eye view of lead volume, active pipeline value, channel breakdown, and missing phone numbers.
+
+---
+
+### 2. AI Toolchain & Practical Application
+
+#### **AI Agent Harness & Model Orchestration**
+* **Agentic Harness:** Google Antigravity & GitHub Copilot
+* **Architecture, Design & Strategy Planning:** GPT Sol 5.6, Gemini Argon 4, Opus 5.5
+* **High-Speed Implementation & Edge Engineering:** Gemini 3.8 Flash, GPT Sol 5.6
+* **Production Runtime Inference:** Cloudflare Workers AI (`@cf/meta/llama-3.3-70b-instruct`) for edge extraction and tone-matched drafting.
+
+#### **How AI is Applied in the CRM**
+1. **Zero-Friction Detail Extraction**: When an inquiry arrives in informal Banglish—e.g., *"amader corporate team er jonno AI bootcamp quote lagbe. 25 jon engineer attend korbe"*—the system automatically extracts the contact, team size (25 engineers), intent, and estimated deal value without manual form-filling.
+2. **Context-Aware Reply Drafting**: Generates sensible first-draft responses aligned with the specific course or corporate program mentioned, saving the admissions team from typing repetitive greetings.
+
+---
+
+### 3. Current Limitations (What Needs Live Credentials)
+
+* **Official WhatsApp Cloud API**: In this demo environment, outbound WhatsApp messages run in sandbox simulation mode, and incoming webhooks run via authenticated test fixtures. Hooking up live, 2-way background messaging requires BIAI's verified Meta Business Account credentials.
+* **Audio Voice Notes**: Phone call notes are currently logged manually as text entries. Direct voice note speech-to-text transcription isn't hooked up yet.
+
+---
+
+### 4. What I Would Add Next
+
+1. **Direct WhatsApp & Messenger 2-Way Sync**: Connect BIAI’s live Meta WABA account so counselor replies send directly through WhatsApp Cloud API inside the thread.
+2. **bKash & Nagad Payment Auto-Match**: Automatically verify transaction IDs (TrxID) sent by students against merchant IPN statements to auto-transition leads to "Paid / Enrolled".
+3. **Frontline Voice Memo Transcription**: Allow counselors to record a quick 15-second audio memo after a phone call and have it automatically transcribed into bullet points on the customer’s card.
+
+
+##  Quick Start (Local Development)
 
 ```bash
 # Navigate to the app directory
@@ -45,7 +87,7 @@ Open `http://localhost:5173` to interact with the full CRM, the live AI Parser S
 
 ---
 
-## ☁️ Cloudflare Deployment Runbook
+##  Cloudflare Deployment Runbook
 
 ### Prerequisites
 - Node.js $\ge 20$
@@ -71,7 +113,7 @@ npm run deploy
 
 ---
 
-## 📂 Project Structure
+##  Project Structure
 
 ```text
 apps/task1-crm/
@@ -108,7 +150,7 @@ apps/task1-crm/
 
 ---
 
-## 🧪 Verification & Acceptance Metrics
+##  Verification & Acceptance Metrics
 
 Run `npm test` to verify:
 - **Phone Normalization:** 100% precision on BD local numbers, prefix stripping, and operator detection.
