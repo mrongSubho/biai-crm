@@ -1075,7 +1075,7 @@
                 class={`work-card group relative w-full text-left p-3.5 rounded-xl border transition-colors duration-150 cursor-pointer ${item.railClass} ${
                   isSelected
                     ? 'bg-orange-50/80 border-orange-400 dark:bg-orange-950/30 dark:border-orange-700 ring-2 ring-orange-600/50 dark:ring-orange-500/50'
-                    : 'bg-white hover:bg-warm-100/70 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-850 hover:border-warm-300 dark:hover:border-slate-700'
+                    : 'bg-white hover:bg-warm-100/70 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-800 hover:border-warm-300 dark:hover:border-slate-700'
                 }`}>
 
                 <!-- Card Top Row: Sender, Org, Financial/Seat -->
@@ -1181,7 +1181,7 @@
             {@const stageItems = filteredEnquiries.filter(e => e.pipeline_stage === stage)}
             {@const stageSum = stageItems.reduce((acc, e) => acc + (e.estimated_value_bdt || 0), 0)}
             <div class="kanban-column w-72 shrink-0 flex flex-col bg-white/70 dark:bg-slate-900/60 rounded-xl border border-warm-200 dark:border-slate-800 overflow-hidden shadow-xs h-full min-h-0">
-              <div class="p-3 border-b border-warm-200 dark:border-slate-800 bg-warm-50 dark:bg-slate-850 flex items-center justify-between shrink-0">
+              <div class="p-3 border-b border-warm-200 dark:border-slate-800 bg-warm-50 dark:bg-slate-900 flex items-center justify-between shrink-0">
                 <div class="flex items-center gap-2">
                   <span class="font-bold text-xs text-slate-800 dark:text-slate-200">{stage}</span>
                   <span class="text-[10px] font-mono tabular-nums px-1.5 py-0.2 rounded-full bg-warm-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-semibold">
@@ -1212,7 +1212,7 @@
                       class={`work-card group relative w-full text-left p-3 rounded-lg border transition-colors duration-150 cursor-pointer ${item.railClass} ${
                         isSelected
                           ? 'bg-orange-50/80 border-orange-400 dark:bg-orange-950/30 dark:border-orange-700 ring-2 ring-orange-600/50'
-                          : 'bg-white hover:bg-warm-100/70 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-850'
+                          : 'bg-white hover:bg-warm-100/70 border-warm-200 dark:bg-slate-900 dark:border-slate-800 dark:hover:bg-slate-800'
                       }`}>
                       <div class="flex items-start justify-between gap-1">
                         <span class="font-semibold text-xs text-slate-900 dark:text-white truncate">
@@ -1362,7 +1362,7 @@
         <div class="flex-1 flex flex-col min-h-0 p-3.5 gap-2.5 overflow-hidden text-xs">
 
           <!-- SLA Policy & Pacing Card (shrink-0) -->
-          <div class="bg-warm-50 dark:bg-slate-850 p-2.5 rounded-lg border border-warm-200 dark:border-slate-800 flex items-center justify-between text-xs shrink-0">
+          <div class="bg-warm-50 dark:bg-slate-900 p-2.5 rounded-lg border border-warm-200 dark:border-slate-800 flex items-center justify-between text-xs shrink-0">
             <div>
               <span class="text-slate-500 text-[11px]">48-Hour SLA Status:</span>
               <div class="flex items-center gap-2 mt-0.5">
@@ -1437,7 +1437,7 @@
 
             <textarea
               bind:value={editableReply}
-              class="w-full flex-1 min-h-0 resize-none overflow-y-auto overscroll-contain text-xs p-2.5 rounded-lg border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-850 text-slate-900 dark:text-slate-100 font-bengali leading-relaxed focus:outline-none focus:ring-1 focus:ring-orange-600"
+              class="w-full flex-1 min-h-0 resize-none overflow-y-auto overscroll-contain text-xs p-2.5 rounded-lg border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-bengali leading-relaxed focus:outline-none focus:ring-1 focus:ring-orange-600"
               placeholder="Draft your reply..."></textarea>
 
             <!-- Reply Actions (Pinned at bottom, shrink-0) -->
