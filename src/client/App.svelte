@@ -318,7 +318,7 @@
         const matchesName = e.sender_name?.toLowerCase().includes(q);
         const matchesOrg = (e as any).organization?.toLowerCase().includes(q);
         const matchesPhone = e.phone?.includes(q) || e.normalized_phone?.includes(q);
-        const matchesMsg = e.message?.toLowerCase().includes(q);
+        const matchesMsg = (e.message || e.raw_message || '')?.toLowerCase().includes(q);
         const matchesId = String(e.id) === q || `lead-${e.id}` === q;
         if (!matchesName && !matchesOrg && !matchesPhone && !matchesMsg && !matchesId) return false;
       }
@@ -514,7 +514,7 @@
       e.seats || 1,
       e.sla_due_at,
       e.first_response_at || '',
-      `"${e.message.replace(/"/g, '""')}"`
+      `"${(e.message || e.raw_message || '').replace(/"/g, '""')}"`
     ]);
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -1173,7 +1173,7 @@
 
                 <!-- Calm Message Body (Strict 2-Line Clamp Without Hover Reflow) -->
                 <p class="text-xs text-slate-700 dark:text-slate-300 line-clamp-2 my-2 font-bengali leading-relaxed">
-                  "{item.message}"
+                  "{item.message || item.raw_message || ''}"
                 </p>
 
                 <!-- Card Footer: Orthogonal Priority & Stable Urgency Badge -->
@@ -1181,7 +1181,7 @@
                   <div class="flex items-center gap-1.5 text-slate-500 font-medium truncate">
                     <span>{item.channel}</span>
                     <span>·</span>
-                    <span>{item.detected_language === 'BN_SCRIPT' ? 'বাংলা' : item.detected_language}</span>
+                    <span>{(item.detected_language || item.language) === 'BN_SCRIPT' ? 'বাংলা' : (item.detected_language || item.language)}</span>
                     {#if item.program_intent}
                       <span>·</span>
                       <span class="text-orange-600 dark:text-orange-400 font-semibold truncate">{item.program_intent}</span>
@@ -1285,7 +1285,7 @@
                       </div>
 
                       <p class="text-xs text-slate-700 dark:text-slate-300 line-clamp-2 my-2 font-bengali leading-relaxed">
-                        "{item.message}"
+                        "{item.message || item.raw_message || ''}"
                       </p>
 
                       <!-- Smart Semantic Urgency Label (One-Lined, No Nested Card) -->
@@ -1462,13 +1462,13 @@
                 Original Inbound Message
               </span>
               <span class="text-[10px] text-slate-400">
-                Language: <strong class="text-slate-700 dark:text-slate-300">{selectedEnquiry.detected_language}</strong>
+                Language: <strong class="text-slate-700 dark:text-slate-300">{(selectedEnquiry.detected_language || selectedEnquiry.language) === 'BN_SCRIPT' ? 'বাংলা' : (selectedEnquiry.detected_language || selectedEnquiry.language || 'Banglish')}</strong>
                 ({Math.round((selectedEnquiry.language_confidence || 1) * 100)}%)
               </span>
             </div>
 
             <div class="bengali-quote bg-warm-50 dark:bg-slate-950 p-2.5 rounded-lg border-l-4 border-orange-500 border-t border-r border-b border-warm-200 dark:border-slate-800 text-xs text-slate-800 dark:text-slate-100 max-h-24 overflow-y-auto overscroll-contain font-bengali leading-relaxed">
-              "{selectedEnquiry.message}"
+              "{selectedEnquiry.message || selectedEnquiry.raw_message || ''}"
             </div>
           </div>
 
