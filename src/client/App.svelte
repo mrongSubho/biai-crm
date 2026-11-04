@@ -10,11 +10,13 @@
   import Icon from '../lib/ui/Icon.svelte';
   import { detectDialect } from '../lib/engine/dialect';
   import { generateSuggestedReplies, getTriDialectReplies, type TonePreset } from '../lib/engine/replies';
+  import { generateWeeklyExecutiveDigest } from '../lib/engine/weekly_digest';
+  import WeeklyExecutiveDigest from '../lib/ui/WeeklyExecutiveDigest.svelte';
   import type { ExtractionResult, PipelineStage, Channel } from '../lib/types/crm';
 
   // --- THEME & VIEWPORT STATE ---
   let theme = $state<'dark' | 'light'>('light');
-  let viewMode = $state<'inbox' | 'board'>('inbox');
+  let viewMode = $state<'inbox' | 'board' | 'digest'>('inbox');
   let boardInspectorOpen = $state(false);
   let boardScrollContainer: HTMLDivElement | null = $state(null);
   let evaluatorMode = $state(false);
@@ -380,6 +382,11 @@
     })
   );
 
+  // Weekly Executive AI Digest (Sat 00:00 - Fri 23:59 Business Cycle)
+  let weeklyDigest = $derived(
+    generateWeeklyExecutiveDigest(evaluatedEnquiries, evaluatorMode ? simTime : '2026-10-28T12:00:00')
+  );
+
   // Queue & Filter Stream
   let filteredEnquiries = $derived(
     evaluatedEnquiries.filter(e => {
@@ -605,7 +612,7 @@
     }, 50);
   }
 
-  function switchViewMode(mode: 'inbox' | 'board') {
+  function switchViewMode(mode: 'inbox' | 'board' | 'digest') {
     viewMode = mode;
     if (mode === 'board') {
       boardInspectorOpen = false;
@@ -1347,9 +1354,9 @@
             ] as q}
               <button
                 type="button"
-                onclick={() => activeQueue = q.key as any}
+                onclick={() => { activeQueue = q.key as any; if (viewMode === 'digest') viewMode = 'inbox'; }}
                 class={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition ${
-                  activeQueue === q.key
+                  activeQueue === q.key && viewMode !== 'digest'
                     ? 'bg-orange-50 text-orange-950 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-200 dark:border-orange-800 font-semibold'
                     : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-warm-100 dark:hover:bg-slate-800 border border-transparent'
                 }`}>
@@ -1373,39 +1380,70 @@
           <div class="space-y-0.5 text-xs">
             <button
               type="button"
-              onclick={() => activeFilter = 'all'}
-              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition ${activeFilter === 'all' ? 'text-orange-700 dark:text-orange-300 font-semibold bg-orange-50/50 dark:bg-orange-950/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+              onclick={() => { activeFilter = 'all'; if (viewMode === 'digest') viewMode = 'inbox'; }}
+              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition ${activeFilter === 'all' && viewMode !== 'digest' ? 'text-orange-700 dark:text-orange-300 font-semibold bg-orange-50/50 dark:bg-orange-950/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
               All Inquiries
             </button>
             <button
               type="button"
-              onclick={() => activeFilter = 'p0'}
-              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition flex items-center gap-1.5 ${activeFilter === 'p0' ? 'text-rose-700 dark:text-rose-300 font-semibold bg-rose-50/50 dark:bg-rose-950/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+              onclick={() => { activeFilter = 'p0'; if (viewMode === 'digest') viewMode = 'inbox'; }}
+              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition flex items-center gap-1.5 ${activeFilter === 'p0' && viewMode !== 'digest' ? 'text-rose-700 dark:text-rose-300 font-semibold bg-rose-50/50 dark:bg-rose-950/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
               <Icon name="shield-alert" size={13} class="text-rose-500" />
               <span>P0 PR Threats</span>
             </button>
             <button
               type="button"
-              onclick={() => activeFilter = 'at_risk'}
-              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition flex items-center gap-1.5 ${activeFilter === 'at_risk' ? 'text-amber-700 dark:text-amber-300 font-semibold bg-amber-50/50 dark:bg-amber-950/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+              onclick={() => { activeFilter = 'at_risk'; if (viewMode === 'digest') viewMode = 'inbox'; }}
+              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition flex items-center gap-1.5 ${activeFilter === 'at_risk' && viewMode !== 'digest' ? 'text-amber-700 dark:text-amber-300 font-semibold bg-amber-50/50 dark:bg-amber-950/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
               <Icon name="clock" size={13} class="text-amber-500" />
               <span>At Risk (&lt;12h)</span>
             </button>
             <button
               type="button"
-              onclick={() => activeFilter = 'corporate'}
-              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition flex items-center gap-1.5 ${activeFilter === 'corporate' ? 'text-slate-900 dark:text-white font-semibold bg-warm-100 dark:bg-slate-800' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+              onclick={() => { activeFilter = 'corporate'; if (viewMode === 'digest') viewMode = 'inbox'; }}
+              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition flex items-center gap-1.5 ${activeFilter === 'corporate' && viewMode !== 'digest' ? 'text-slate-900 dark:text-white font-semibold bg-warm-100 dark:bg-slate-800' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
               <Icon name="building" size={13} class="text-indigo-500" />
               <span>Corporate Whales</span>
             </button>
             <button
               type="button"
-              onclick={() => activeFilter = 'bangla'}
-              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition flex items-center gap-1.5 ${activeFilter === 'bangla' ? 'text-slate-900 dark:text-white font-semibold bg-warm-100 dark:bg-slate-800' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
+              onclick={() => { activeFilter = 'bangla'; if (viewMode === 'digest') viewMode = 'inbox'; }}
+              class={`w-full text-left px-2.5 py-1.5 rounded-lg transition flex items-center gap-1.5 ${activeFilter === 'bangla' && viewMode !== 'digest' ? 'text-slate-900 dark:text-white font-semibold bg-warm-100 dark:bg-slate-800' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
               <span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
               <span>Bangla Unicode</span>
             </button>
           </div>
+        </div>
+
+        <!-- Executive Intelligence (Saturday 00:00 - Friday 23:59 AI Digest) -->
+        <div>
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 mb-1.5 flex items-center justify-between">
+            <span>Executive Insights</span>
+            <span class="text-[8.5px] font-mono text-orange-600 dark:text-orange-400 bg-orange-100 dark:bg-orange-950/80 px-1 rounded font-semibold">Sat–Fri</span>
+          </div>
+          <button
+            type="button"
+            onclick={() => viewMode = 'digest'}
+            class={`w-full text-left p-2.5 rounded-xl border transition group relative overflow-hidden ${
+              viewMode === 'digest'
+                ? 'bg-gradient-to-br from-orange-500/15 to-amber-500/10 border-orange-500/60 dark:border-orange-500/50 text-slate-900 dark:text-white shadow-xs'
+                : 'border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-900/40 text-slate-700 dark:text-slate-300 hover:border-orange-400/50 hover:bg-orange-50/30 dark:hover:bg-orange-950/20'
+            }`}>
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-orange-600 to-amber-500 text-white flex items-center justify-center shrink-0 shadow-2xs text-xs font-bold">
+                ✨
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="text-xs font-bold truncate flex items-center gap-1.5">
+                  <span>Weekly AI Digest</span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                </div>
+                <div class="text-[10px] text-slate-500 dark:text-slate-400 truncate font-mono">
+                  Sat 00:00 – Fri 23:59
+                </div>
+              </div>
+            </div>
+          </button>
         </div>
       </div>
 
@@ -1469,6 +1507,28 @@
                 {/each}
               </nav>
             </div>
+
+            <!-- Mobile Executive Insights -->
+            <div>
+              <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 mb-1.5 flex items-center justify-between">
+                <span>Executive Insights</span>
+                <span class="text-[9px] font-mono text-orange-600 dark:text-orange-400 bg-orange-100 dark:bg-orange-950/80 px-1 py-0.2 rounded font-semibold">Sat–Fri</span>
+              </div>
+              <button
+                type="button"
+                onclick={() => { viewMode = 'digest'; mobileNavOpen = false; }}
+                class={`w-full text-left p-2.5 rounded-xl border transition flex items-center gap-2.5 ${
+                  viewMode === 'digest'
+                    ? 'bg-orange-600 text-white font-semibold border-orange-600'
+                    : 'text-slate-700 dark:text-slate-300 hover:bg-warm-100 dark:hover:bg-slate-800 border-warm-200 dark:border-slate-800'
+                }`}>
+                <span class="text-base">✨</span>
+                <div class="min-w-0 flex-1">
+                  <div class="text-xs font-bold truncate">Weekly Executive AI Digest</div>
+                  <div class="text-[10px] opacity-80 truncate font-mono">Sat 00:00 – Fri 23:59</div>
+                </div>
+              </button>
+            </div>
           </div>
 
           <div class="p-3 border-t border-warm-200 dark:border-slate-800 bg-warm-50/50 dark:bg-slate-900/80 shrink-0">
@@ -1489,9 +1549,18 @@
     {/if}
 
     <!-- ------------------------------------------------------ -->
-    <!-- PANE 2: CONVERSATION STREAM OR KANBAN BOARD            -->
+    <!-- PANE 2: CONVERSATION STREAM, KANBAN BOARD, OR DIGEST   -->
     <!-- ------------------------------------------------------ -->
-    {#if viewMode === 'inbox'}
+    {#if viewMode === 'digest'}
+      <WeeklyExecutiveDigest
+        digest={weeklyDigest}
+        onClose={() => viewMode = 'inbox'}
+        onSelectEnquiry={(id) => {
+          selectLead(Number(id));
+          viewMode = 'inbox';
+        }}
+      />
+    {:else if viewMode === 'inbox'}
       <section class="flex-1 min-w-[320px] border-r border-warm-200 dark:border-slate-800 bg-warm-50 dark:bg-slate-950 flex flex-col min-h-0 overflow-hidden">
         <!-- Stream Header with View Toggle -->
         <div class="h-10 border-b border-warm-200 dark:border-slate-800 px-3.5 flex items-center justify-between bg-white dark:bg-slate-900 text-xs shrink-0">
