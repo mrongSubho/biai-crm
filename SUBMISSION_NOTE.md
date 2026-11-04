@@ -2,8 +2,9 @@
 
 **Candidate:** Subho Mrong  
 **Submission Date:** 2 November 2026  
-**Live Demo (Cloudflare):** `https://biai-crm.pages.dev` *(or worker endpoint)*  
-**Code Repository:** `apps/task1-crm`  
+**Live Demo (Cloudflare Edge):** `https://biaicrm.mrong.tech`  
+**Corporate Pipeline Workspace:** `https://biaileads.mrong.tech`  
+**Code Repository:** `https://github.com/mrongSubho/biai-crm`  
 **Loom Walkthrough (4 min 30s):** `[Loom Video URL]`
 
 ---

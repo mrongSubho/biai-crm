@@ -443,33 +443,41 @@
     }, 50);
   }
 
-  function ingestCustomMessage() {
+  async function ingestCustomMessage() {
     if (!ingestMessage.trim()) return;
 
-    const extraction = parseIncomingMessage(ingestMessage, ingestChannel);
+    // Fast deterministic parser on client
+    const extraction = parseIncomingMessage({
+      content: ingestMessage,
+      senderRaw: ingestSenderName,
+      phoneRaw: ingestPhone,
+      channel: ingestChannel
+    });
     const newId = enquiries.length > 0 ? Math.max(...enquiries.map(e => e.id)) + 1 : 1;
 
     const newEnquiry: any = {
       id: newId,
       channel: ingestChannel,
       received_at: new Date().toISOString(),
-      sender_name: ingestSenderName || 'Direct Inbound Customer',
-      phone: ingestPhone || null,
+      sender_name: extraction.extracted_name || ingestSenderName || 'Direct Inbound Customer',
+      phone: ingestPhone || extraction.raw_phone || null,
       normalized_phone: extraction.normalized_phone || ingestPhone || null,
       contact_id: `ct_${newId}`,
       detected_language: extraction.detected_language,
-      language_confidence: extraction.confidence,
+      language_confidence: extraction.language_confidence,
       program_intent: extraction.program_intent,
       triage_category: extraction.triage_category,
       urgency: extraction.urgency,
       sentiment: extraction.sentiment,
       pipeline_stage: 'New' as PipelineStage,
-      estimated_value_bdt: extraction.estimated_budget_bdt || 0,
-      seats: extraction.seats_detected || 1,
+      estimated_value_bdt: extraction.estimated_value_bdt || 0,
+      seats: extraction.estimated_seats || 1,
       sla_due_at: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
       first_response_at: null,
       message: ingestMessage,
-      suggested_reply: extraction.suggested_reply,
+      raw_message: ingestMessage,
+      suggested_reply: extraction.suggested_replies.primary,
+      suggested_reply_alt: extraction.suggested_replies.alternate,
       reply_status: 'PENDING',
       flags: extraction.urgency === 'CRITICAL' ? ['PR_RISK'] : []
     };
@@ -477,6 +485,23 @@
     enquiries = [newEnquiry, ...enquiries];
     selectedId = newId;
     showParserModal = false;
+
+    // Background server ingestion & D1 persistence
+    try {
+      await fetch('/api/v1/enquiries/parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          content: ingestMessage,
+          senderRaw: ingestSenderName,
+          phoneRaw: ingestPhone,
+          channel: ingestChannel
+        })
+      });
+    } catch (e) {
+      console.warn('Background sync warning:', e);
+    }
 
     if (extraction.triage_category === 'CRITICAL_ESCALATION') {
       soundFx.playEmergencyAlert();
