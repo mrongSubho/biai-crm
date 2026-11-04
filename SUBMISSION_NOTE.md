@@ -48,7 +48,6 @@ I built this CRM to solve those exact daily headaches for the BIAI team:
 #### **How AI is Applied in the CRM**
 1. **Zero-Friction Detail Extraction**: When an inquiry arrives in informal Banglish—e.g., *"amader corporate team er jonno AI bootcamp quote lagbe. 25 jon engineer attend korbe"*—the system automatically extracts the contact, team size (25 engineers), intent, and estimated deal value without manual form-filling.
 2. **Context-Aware Reply Drafting**: Generates sensible first-draft responses aligned with the specific course or corporate program mentioned, saving the admissions team from typing repetitive greetings.
-3. **Deterministic Fail-Safe Rules**: If an external AI endpoint times out or is offline, built-in keyword and triage heuristics take over so the inbox **never crashes or freezes**.
 
 ---
 
