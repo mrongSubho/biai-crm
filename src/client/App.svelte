@@ -141,6 +141,63 @@
   let simulateInputText = $state('');
   let simulateChannel = $state<Channel>('WhatsApp');
   let lastSyncedId = $state<number | null>(null);
+  let lastPanelVisibleState = $state(false);
+  let isGeneratingReply = $state(false);
+  let replyStreamTimeout: any = null;
+  let targetFullReply = $state('');
+
+  function cancelReplyStream() {
+    if (replyStreamTimeout) {
+      clearTimeout(replyStreamTimeout);
+      replyStreamTimeout = null;
+    }
+    isGeneratingReply = false;
+  }
+
+  function finishStreamingImmediately() {
+    if (isGeneratingReply && targetFullReply) {
+      cancelReplyStream();
+      editableReply = targetFullReply;
+    }
+  }
+
+  function streamReplyText(fullText: string, animate: boolean = true) {
+    cancelReplyStream();
+    targetFullReply = fullText;
+
+    if (!animate || !fullText) {
+      editableReply = fullText;
+      isGeneratingReply = false;
+      return;
+    }
+
+    editableReply = '';
+    isGeneratingReply = true;
+
+    let index = 0;
+    const totalLength = fullText.length;
+
+    function typeNextChunk() {
+      if (index >= totalLength) {
+        editableReply = fullText;
+        isGeneratingReply = false;
+        replyStreamTimeout = null;
+        return;
+      }
+
+      // 1-3 characters at a time for natural streaming velocity
+      const chunk = Math.min(Math.floor(Math.random() * 2) + 1, totalLength - index);
+      index += chunk;
+      editableReply = fullText.slice(0, index);
+
+      // Fast responsive streaming: 8-16ms per tick
+      const delay = Math.floor(Math.random() * 8) + 8;
+      replyStreamTimeout = setTimeout(typeNextChunk, delay);
+    }
+
+    // Brief initial pause before streaming starts (~80ms) for delightful sensation
+    replyStreamTimeout = setTimeout(typeNextChunk, 80);
+  }
 
   // Tone & Dialect Switching State
   let activeTone = $state<TonePreset>('Professional');
@@ -351,7 +408,10 @@
     };
 
     window.addEventListener('keydown', handleKeydown);
-    return () => window.removeEventListener('keydown', handleKeydown);
+    return () => {
+      window.removeEventListener('keydown', handleKeydown);
+      cancelReplyStream();
+    };
   });
 
   function toggleTheme() {
@@ -502,24 +562,38 @@
     evaluatedEnquiries[0]
   );
 
-  // Sync draft reply whenever selected enquiry changes
+  // Sync draft reply ONLY when the detailed message panel is open and inquiry changes
   $effect(() => {
-    if (selectedEnquiry && selectedEnquiry.id !== lastSyncedId) {
-      lastSyncedId = selectedEnquiry.id;
-      const lang = selectedEnquiry.detected_language || selectedEnquiry.language;
-      if (lang === 'BN_SCRIPT') {
-        currentDialect = 'bn';
-      } else if (lang === 'EN') {
-        currentDialect = 'en';
-      } else {
-        currentDialect = 'banglish';
+    const isPanelVisible = viewMode === 'inbox' || boardInspectorOpen;
+    if (selectedEnquiry && isPanelVisible) {
+      const isNewEnquiry = selectedEnquiry.id !== lastSyncedId;
+      const isNewlyOpenedPanel = !lastPanelVisibleState && isPanelVisible;
+
+      if (isNewEnquiry || isNewlyOpenedPanel) {
+        lastSyncedId = selectedEnquiry.id;
+        lastPanelVisibleState = isPanelVisible;
+
+        const lang = selectedEnquiry.detected_language || selectedEnquiry.language;
+        if (lang === 'BN_SCRIPT') {
+          currentDialect = 'bn';
+        } else if (lang === 'EN') {
+          currentDialect = 'en';
+        } else {
+          currentDialect = 'banglish';
+        }
+        applyDialectAndTone(currentDialect, activeTone, true);
+        scrollChatToBottom(false);
       }
-      applyDialectAndTone(currentDialect, activeTone);
-      scrollChatToBottom(false);
+    } else {
+      lastPanelVisibleState = isPanelVisible;
+      if (!isPanelVisible) {
+        cancelReplyStream();
+        editableReply = '';
+      }
     }
   });
 
-  function applyDialectAndTone(newDialect?: 'bn' | 'banglish' | 'en', newTone?: TonePreset) {
+  function applyDialectAndTone(newDialect?: 'bn' | 'banglish' | 'en', newTone?: TonePreset, animate: boolean = true) {
     if (newDialect) currentDialect = newDialect;
     if (newTone) activeTone = newTone;
     if (!selectedEnquiry) return;
@@ -534,13 +608,14 @@
       messageContent: selectedEnquiry.message || selectedEnquiry.raw_message || ''
     }, activeTone);
 
+    let chosen = tri.banglish;
     if (currentDialect === 'bn') {
-      editableReply = tri.bn;
-    } else if (currentDialect === 'banglish') {
-      editableReply = tri.banglish;
-    } else {
-      editableReply = tri.en;
+      chosen = tri.bn;
+    } else if (currentDialect === 'en') {
+      chosen = tri.en;
     }
+
+    streamReplyText(chosen, animate);
   }
 
   function cycleDialect() {
@@ -551,7 +626,7 @@
     } else {
       currentDialect = 'bn';
     }
-    applyDialectAndTone();
+    applyDialectAndTone(currentDialect, activeTone, true);
     soundFx.playWarningPing();
     showFeedback(`Switched dialect to ${currentDialect === 'bn' ? 'বাংলা' : currentDialect === 'banglish' ? 'Banglish' : 'English'}`);
   }
@@ -579,6 +654,7 @@
     selectedEnquiry.ai_provider = next;
     soundFx.playWarningPing();
     showFeedback(`Switched AI Provider to ${label}`);
+    applyDialectAndTone(currentDialect, activeTone, true);
   }
 
   let ingestAiProvider = $state<'gemini-2.5-flash' | 'workers-ai' | 'deterministic'>('gemini-2.5-flash');
@@ -780,6 +856,7 @@
 
   // --- ACTIONS ---
   async function approveReply(id: number) {
+    finishStreamingImmediately();
     const textToSend = editableReply;
     if (!textToSend.trim()) return;
     isSendingReply = true;
@@ -859,18 +936,18 @@
     if (lower.includes('trxid') || lower.includes('bkash') || lower.includes('send korechi') || lower.includes('3,500') || lower.includes('paid')) {
       const trxMatch = text.match(/trxid:?\s*([a-z0-9]+)/i);
       const trxId = trxMatch ? trxMatch[1].toUpperCase() : '9L4K2918X';
-      editableReply = `Walaikum Assalam ${firstName} vai! Apnar bKash payment TrxID: ${trxId} amra receive korechi ebong finance team ke verify korte bolechi. Verification complete houa matroi apnar confirmed seat admission voucher ebong Discord onboarding link pathiye deya hobe. Welcome to Bangladesh AI Institute! 🎉`;
+      streamReplyText(`Walaikum Assalam ${firstName} vai! Apnar bKash payment TrxID: ${trxId} amra receive korechi ebong finance team ke verify korte bolechi. Verification complete houa matroi apnar confirmed seat admission voucher ebong Discord onboarding link pathiye deya hobe. Welcome to Bangladesh AI Institute! 🎉`, true);
       
       enquiries = enquiries.map(e => e.id === selectedEnquiry.id ? { ...e, pipeline_stage: 'Interested' as PipelineStage } : e);
       showFeedback(`Payment TrxID detected! Stage moved to Interested & verification reply generated.`);
     } else if (lower.includes('10 jon') || lower.includes('group discount') || lower.includes('corporate') || lower.includes('company')) {
-      editableReply = `Assalamualaikum ${firstName} vai! Excellent news. Amader 10+ batch corporate enrollment er jonno 15% institutional discount offer ache ebong customized project mentoring provide kora hoy. Apnar company name ebong HR/Finance email ta ki deya jabe? Amra direct official customized quotation invoice pathiye dicchi.`;
+      streamReplyText(`Assalamualaikum ${firstName} vai! Excellent news. Amader 10+ batch corporate enrollment er jonno 15% institutional discount offer ache ebong customized project mentoring provide kora hoy. Apnar company name ebong HR/Finance email ta ki deya jabe? Amra direct official customized quotation invoice pathiye dicchi.`, true);
       showFeedback(`Corporate team expansion detected! Enterprise reply drafted.`);
     } else if (lower.includes('weekend') || lower.includes('timing') || lower.includes('schedule')) {
-      editableReply = `Walaikum Assalam ${firstName} vai! Amader 3-day AI Bootcamp schedule shudhu Friday & Saturday shondha 7:00 PM theke 10:00 PM porjonto interactive live online Zoom session e hoy. Shob class er full HD recording ebong GitHub source code repository shathe shathe lifetime access hishabe paben.`;
+      streamReplyText(`Walaikum Assalam ${firstName} vai! Amader 3-day AI Bootcamp schedule shudhu Friday & Saturday shondha 7:00 PM theke 10:00 PM porjonto interactive live online Zoom session e hoy. Shob class er full HD recording ebong GitHub source code repository shathe shathe lifetime access hishabe paben.`, true);
       showFeedback(`Schedule inquiry detected! Timing reply drafted.`);
     } else if (lower.includes('certificate') || lower.includes('syllabus') || lower.includes('brochure')) {
-      editableReply = `Assalamualaikum ${firstName} vai! Ji oboshoy, course sheshe industry-verified digital verifiable credential certificate paben ja LinkedIn e directly add kora jay. Amader comprehensive course syllabus brochure PDF ta ekhane attach kore dicchi: https://biai.com.bd/curriculum/bootcamp-latest.pdf`;
+      streamReplyText(`Assalamualaikum ${firstName} vai! Ji oboshoy, course sheshe industry-verified digital verifiable credential certificate paben ja LinkedIn e directly add kora jay. Amader comprehensive course syllabus brochure PDF ta ekhane attach kore dicchi: https://biai.com.bd/curriculum/bootcamp-latest.pdf`, true);
       showFeedback(`Syllabus inquiry detected! Curriculum brochure reply drafted.`);
     } else {
       const replyPair = generateSuggestedReplies({
@@ -882,7 +959,7 @@
         seats: selectedEnquiry.seats || 1,
         messageContent: text
       });
-      editableReply = replyPair.primary;
+      streamReplyText(replyPair.primary, true);
       showFeedback(`AI context updated based on customer follow-up.`);
     }
 
@@ -2308,8 +2385,14 @@
             <div class="flex items-center justify-between gap-1.5 shrink-0">
               <!-- Left: Title, Subtle AI Badge & Tone Selector -->
               <div class="flex items-center gap-1.5 min-w-0">
-                <span class="text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider shrink-0">
-                  Suggested Reply
+                <span class="text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider shrink-0 flex items-center gap-1">
+                  <span>Suggested Reply</span>
+                  {#if isGeneratingReply}
+                    <span class="inline-flex items-center gap-1 text-[9.5px] text-orange-600 dark:text-orange-400 font-medium lowercase tracking-normal">
+                      <span class="w-1.5 h-1.5 rounded-full bg-orange-500 animate-ping"></span>
+                      <span class="animate-pulse">generating...</span>
+                    </span>
+                  {/if}
                 </span>
 
                 <!-- Subtle AI Engine Clickable SVG Icon (No label) -->
@@ -2355,7 +2438,7 @@
                   {#each tonePresets as t}
                     <button
                       type="button"
-                      onclick={() => applyDialectAndTone(currentDialect, t)}
+                      onclick={() => applyDialectAndTone(currentDialect, t, true)}
                       class={`px-1.5 py-0.2 rounded font-medium transition ${
                         activeTone === t
                           ? 'bg-orange-600 text-white shadow-xs font-semibold'
@@ -2371,35 +2454,50 @@
               <div class="inline-flex rounded-md bg-warm-100 dark:bg-slate-800 p-0.5 font-mono text-[9.5px] shrink-0">
                 <button
                   type="button"
-                  onclick={() => applyDialectAndTone('bn')}
+                  onclick={() => applyDialectAndTone('bn', activeTone, true)}
                   class={`px-2 py-0.5 rounded transition ${currentDialect === 'bn' ? 'bg-orange-600 text-white font-bold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
                   বাংলা
                 </button>
                 <button
                   type="button"
-                  onclick={() => applyDialectAndTone('banglish')}
+                  onclick={() => applyDialectAndTone('banglish', activeTone, true)}
                   class={`px-2 py-0.5 rounded transition ${currentDialect === 'banglish' ? 'bg-orange-600 text-white font-bold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
                   Banglish
                 </button>
                 <button
                   type="button"
-                  onclick={() => applyDialectAndTone('en')}
+                  onclick={() => applyDialectAndTone('en', activeTone, true)}
                   class={`px-2 py-0.5 rounded transition ${currentDialect === 'en' ? 'bg-orange-600 text-white font-bold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}>
                   EN
                 </button>
               </div>
             </div>
 
-            <!-- Expanded Height Suggested Reply Textarea -->
-            <textarea
-              bind:value={editableReply}
-              rows="4"
-              class="w-full resize-none overflow-y-auto overscroll-contain text-xs p-2.5 rounded-lg border border-warm-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-bengali leading-relaxed focus:outline-none focus:ring-1 focus:ring-orange-600 min-h-[100px] lg:min-h-[112px] max-h-[140px]"
-              placeholder="Draft your reply in {currentDialect === 'bn' ? 'বাংলা' : currentDialect === 'banglish' ? 'Banglish' : 'English'}..."></textarea>
+            <!-- Expanded Height Suggested Reply Textarea with Smooth Animated AI Streaming -->
+            <div class="relative w-full">
+              <textarea
+                bind:value={editableReply}
+                onfocus={finishStreamingImmediately}
+                oninput={finishStreamingImmediately}
+                rows="4"
+                class={`w-full resize-none overflow-y-auto overscroll-contain text-xs p-2.5 rounded-lg border bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-bengali leading-relaxed focus:outline-none focus:ring-1 focus:ring-orange-600 min-h-[100px] lg:min-h-[112px] max-h-[140px] transition ${
+                  isGeneratingReply
+                    ? 'border-orange-400 dark:border-orange-500/60 ring-1 ring-orange-500/25'
+                    : 'border-warm-200 dark:border-slate-700'
+                }`}
+                placeholder={isGeneratingReply ? "Generating suggested reply..." : `Draft your reply in ${currentDialect === 'bn' ? 'বাংলা' : currentDialect === 'banglish' ? 'Banglish' : 'English'}...`}></textarea>
+
+              {#if isGeneratingReply}
+                <div class="absolute bottom-2.5 right-2.5 pointer-events-none flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-white/95 dark:bg-slate-900/95 text-[10px] text-orange-600 dark:text-orange-400 font-medium border border-orange-200 dark:border-orange-900/50 shadow-xs backdrop-blur-xs animate-in fade-in duration-150">
+                  <span class="w-1.5 h-1.5 rounded-full bg-orange-500 animate-ping"></span>
+                  <span>AI Generating...</span>
+                </div>
+              {/if}
+            </div>
 
             <!-- Reply Actions (Pinned at bottom, shrink-0) -->
             <div class="flex items-center justify-between shrink-0 pt-0.5">
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-1.5">
                 {#if selectedEnquiry.businessPriority === 'P0'}
                   <button
                     type="button"
@@ -2412,8 +2510,17 @@
 
                 <button
                   type="button"
-                  onclick={() => copyToClipboard(editableReply, 'Suggested reply')}
-                  class="text-xs font-medium bg-warm-100 hover:bg-warm-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
+                  onclick={() => applyDialectAndTone(currentDialect, activeTone, true)}
+                  title="Regenerate suggested reply"
+                  class="text-xs font-medium bg-warm-100 hover:bg-warm-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 px-2.5 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer">
+                  <Icon name="refresh-cw" size={12} class={isGeneratingReply ? 'animate-spin text-orange-600' : ''} />
+                  <span>Regenerate</span>
+                </button>
+
+                <button
+                  type="button"
+                  onclick={() => { finishStreamingImmediately(); copyToClipboard(editableReply, 'Suggested reply'); }}
+                  class="text-xs font-medium bg-warm-100 hover:bg-warm-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer">
                   <Icon name="copy" size={13} />
                   <span>Copy Reply</span>
                 </button>
