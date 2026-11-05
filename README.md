@@ -45,7 +45,7 @@ I built this CRM to solve those exact daily headaches for the BIAI team:
 * **Agentic Harness:** Google Antigravity & GitHub Copilot
 * **Architecture, Design & Strategy Planning:** GPT Sol 5.6, Gemini Argon 4, Opus 5.5
 * **High-Speed Implementation & Edge Engineering:** Gemini 3.8 Flash, GPT Sol 5.6
-* **Production Runtime Inference:** Cloudflare Workers AI (`@cf/meta/llama-3.3-70b-instruct`) for edge extraction and tone-matched drafting.
+* **Production Runtime Inference:** Google Gemini API and Cloudflare Workers AI (`@cf/meta/llama-3.3-70b-instruct`) for edge extraction and tone-matched drafting.
 
 #### **How AI is Applied in the CRM**
 1. **Zero-Friction Detail Extraction**: When an inquiry arrives in informal Banglish—e.g., *"amader corporate team er jonno AI bootcamp quote lagbe. 25 jon engineer attend korbe"*—the system automatically extracts the contact, team size (25 engineers), intent, and estimated deal value without manual form-filling.
