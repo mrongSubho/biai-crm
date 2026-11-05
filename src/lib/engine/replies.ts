@@ -44,9 +44,9 @@ export function getTriDialectReplies(ctx: ReplyGenerationContext, tone: TonePres
   // 2. Critical Escalation / Refund Threat (Row #16 Habibur Rahman)
   if (triageCategory === 'CRITICAL_ESCALATION') {
     return {
-      bn: `[জরুরি ব্যবস্থাপনা স্ক্রিপ্ট]: আসসালামু আলাইকুম ${senderName} সাহেব। আমি বিআইএআই ম্যানেজমেন্ট থেকে বলছি। আপনার রিফান্ড রিকোয়েস্টটি আমরা সর্বোচ্চ অগ্রাধিকার দিয়ে আজকেই প্রসেস করছি। আপনার বিকাশ বা ব্যাংক অ্যাকাউন্ট নম্বরটি কনফার্ম করলে এখনই পাঠিয়ে দিচ্ছি।`,
-      banglish: `[P0 SUPERVISOR SCRIPT]: Assalamualaikum ${senderName} saheb. Ami BIAI Management theke Farhan bolchi. Apnar refund request ti shorbochcho priority diye amra ajkei process korchi. Apnar bKash ba bank account number ta ekhane confirm korle ekhoni disburse kore dicchi.`,
-      en: `[P0 SUPERVISOR DE-ESCALATION SCRIPT]: Assalamualaikum Mr. ${senderName}. This is Farhan from BIAI Management. I personally received your urgent cancellation request and sincerely apologize for your frustration. I have immediately instructed our finance team to expedite your full refund today. Could you please confirm your bKash or Bank details right now so we can disburse it immediately?`
+      bn: `আসসালামু আলাইকুম ${senderName} সাহেব। আমি বিআইএআই ম্যানেজমেন্ট থেকে বলছি। আপনার রিফান্ড রিকোয়েস্টটি আমরা সর্বোচ্চ অগ্রাধিকার দিয়ে আজকেই প্রসেস করছি। আপনার বিকাশ বা ব্যাংক অ্যাকাউন্ট নম্বরটি কনফার্ম করলে এখনই পাঠিয়ে দিচ্ছি।`,
+      banglish: `Assalamualaikum ${senderName} saheb. Ami BIAI Management theke Farhan bolchi. Apnar refund request ti shorbochcho priority diye amra ajkei process korchi. Apnar bKash ba bank account number ta ekhane confirm korle ekhoni disburse kore dicchi.`,
+      en: `Assalamualaikum Mr. ${senderName}. This is Farhan from BIAI Management. I personally received your urgent cancellation request and sincerely apologize for your frustration. I have immediately instructed our finance team to expedite your full refund today. Could you please confirm your bKash or Bank details right now so we can disburse it immediately?`
     };
   }
 

@@ -2395,6 +2395,12 @@
                   {/if}
                 </span>
 
+                {#if selectedEnquiry && (selectedEnquiry.businessPriority === 'P0' || selectedEnquiry.triage_category === 'CRITICAL_ESCALATION')}
+                  <span class="px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-wider bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-300 dark:border-rose-800 shrink-0">
+                    Supervisor De-escalation
+                  </span>
+                {/if}
+
                 <!-- Subtle AI Engine Clickable SVG Icon (No label) -->
                 {#if selectedEnquiry}
                   {#if (selectedEnquiry.ai_provider || '').includes('gemini')}
