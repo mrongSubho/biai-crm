@@ -6,7 +6,7 @@ Production-grade, edge-native CRM and AI Ingestion Engine engineered for the **B
 **Submission Date:** 5 November 2026  
 **Live Application:** [https://biaicrm.mrong.tech](https://biaicrm.mrong.tech)  
 **Code Repository:** [https://github.com/mrongSubho/biai-crm](https://github.com/mrongSubho/biai-crm)  
-**Walkthrough Video (4.5 min):** [Loom Video URL]
+**Walkthrough Video (5 min):** [https://www.loom.com/share/e2545f48a22141c08e3972f29431fc01] (https://www.loom.com/share/e2545f48a22141c08e3972f29431fc01)
 
 ---
 
